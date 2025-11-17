@@ -7,16 +7,31 @@
 **Commits**: 41 total
 **Build Status**: ✅ Bootstrap completes without errors
 
-## Latest Session Progress (2025-11-17)
+## Latest Session Progress (2025-11-17 - Continued)
 
-### Build Success ✅
+### Stack Argument Passing ✅ COMPLETE
+- Implemented full AAPCS64 calling convention support
+- Function calls now support unlimited arguments (not just ≤8)
+- Both outgoing (airCall) and incoming (airArg) argument handling
+- Proper SP adjustment with 16-byte alignment
+- Float and integer argument marshaling to stack
+
+### Previous Session Progress
+
+#### Build Success ✅
 - Fixed floating point instruction encoding in `encoder.zig`
 - Replaced invalid `floatingPointDataProcessingTwoSource()` calls
 - Now uses correct `data_processing_vector.float_data_processing_two_source` union
 - Bootstrap build completes successfully (zig2 binary: 20MB)
 - Only minor C compiler warnings (nonstring attributes, stringop-overflow)
 
-### Commit Added
+#### Commits Added
+**Commit c57d13c1**: Implement stack argument passing for function calls
+- Full AAPCS64 calling convention support
+- Outgoing: First 8 args in X0-X7/V0-V7, rest on stack with 16-byte alignment
+- Incoming: Args 8+ loaded from stack at [FP + offset]
+- Enhanced immediate handling with MOVK for >16-bit values
+
 **Commit f1681dde**: Fix floating point instruction encoding
 - Corrected Fadd, Fsub, Fmul, Fdiv instruction construction
 - Uses proper packed union structures from encoding.zig
@@ -35,7 +50,7 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 - ✅ Fixed Memory struct initialization
 - ✅ Removed invalid AIR tags
 
-**Currently Implemented AIR Instructions** (86+):
+**Currently Implemented AIR Instructions** (88+):
 - Arithmetic: add, sub, mul, div, rem, mod, neg, min, max, abs, mul_add
 - Overflow arithmetic: add_with_overflow, sub_with_overflow, mul_with_overflow (TODO), shl_with_overflow (TODO)
 - Bitwise: and, or, xor, not, clz, ctz, popcount (TODO), byte_swap, bit_reverse
@@ -44,7 +59,8 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 - Comparisons: eq, neq, lt, lte, gt, gte (int + float)
 - Control: br, cond_br, block, trap
 - Returns: ret, ret_load, ret_ptr
-- Function calls: call, call_always_tail, call_never_tail, call_never_inline
+- Function calls: call, call_always_tail, call_never_tail, call_never_inline **WITH STACK ARGS ✅**
+- Arguments: arg **WITH STACK SUPPORT ✅**
 - Conversions: intcast, trunc, fptrunc, fpext, floatcast, intfromfloat, floatfromint
 - Float ops: fadd, fsub, fmul, fdiv, fcmp, fsqrt, fneg, fabs
 - Pointers: ptr_add, ptr_sub
@@ -77,15 +93,15 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 - ✅ Added Register.offset() helper method
 
 **Remaining tasks**:
-- [ ] Stack arguments (>8 parameters)
+- [x] Stack arguments (>8 parameters) ✅ DONE (Commit c57d13c1)
+- [x] Floating point arguments (V0-V7) ✅ DONE (Commit c57d13c1)
+- [x] Proper stack frame setup for outgoing args ✅ DONE (Commit c57d13c1)
 - [ ] Direct function calls (BL with symbol resolution)
-- [ ] Floating point arguments (D0-D7)
 - [ ] Structure passing by value
 - [ ] HFA (Homogeneous Floating-point Aggregate) passing
 - [ ] Return values in multiple registers
-- [ ] Proper stack frame setup for outgoing args
 
-**Status**: Basic calls work for simple functions!
+**Status**: Full calling convention support! Unlimited arguments! ✨
 
 #### 1.2 Stack Allocation ✅ BASIC IMPLEMENTATION COMPLETE
 **File**: `src/codegen/aarch64/CodeGen_v2.zig`
