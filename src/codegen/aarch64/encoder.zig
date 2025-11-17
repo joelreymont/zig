@@ -46,6 +46,12 @@ pub fn encode(inst: Mir.Inst) Error!Instruction {
         .movz => encodeMovz(inst),
         .movk => encodeMovk(inst),
 
+        // Floating point arithmetic
+        .fadd => encodeFadd(inst),
+        .fsub => encodeFsub(inst),
+        .fmul => encodeFmul(inst),
+        .fdiv => encodeFdiv(inst),
+
         // Load/Store
         .ldr => encodeLdr(inst),
         .str => encodeStr(inst),
@@ -754,4 +760,58 @@ fn encodeDsb() Instruction {
 
 fn encodeIsb() Instruction {
     return Instruction.barriers("isb", .sy);
+}
+
+// ============================================================================
+// Floating Point Arithmetic
+// ============================================================================
+
+fn encodeFadd(inst: Mir.Inst) Error!Instruction {
+    const data = inst.data.rrr;
+    // FADD Dd, Dn, Dm (scalar floating point add, double precision)
+    // TODO: Handle different float sizes (f16, f32, f64)
+    // For now, assume f64 (double precision)
+    return Instruction.floatingPointDataProcessingTwoSource(
+        .fadd,
+        .@"64",
+        data.rm.id(),
+        data.rn.id(),
+        data.rd.id(),
+    );
+}
+
+fn encodeFsub(inst: Mir.Inst) Error!Instruction {
+    const data = inst.data.rrr;
+    // FSUB Dd, Dn, Dm (scalar floating point subtract, double precision)
+    return Instruction.floatingPointDataProcessingTwoSource(
+        .fsub,
+        .@"64",
+        data.rm.id(),
+        data.rn.id(),
+        data.rd.id(),
+    );
+}
+
+fn encodeFmul(inst: Mir.Inst) Error!Instruction {
+    const data = inst.data.rrr;
+    // FMUL Dd, Dn, Dm (scalar floating point multiply, double precision)
+    return Instruction.floatingPointDataProcessingTwoSource(
+        .fmul,
+        .@"64",
+        data.rm.id(),
+        data.rn.id(),
+        data.rd.id(),
+    );
+}
+
+fn encodeFdiv(inst: Mir.Inst) Error!Instruction {
+    const data = inst.data.rrr;
+    // FDIV Dd, Dn, Dm (scalar floating point divide, double precision)
+    return Instruction.floatingPointDataProcessingTwoSource(
+        .fdiv,
+        .@"64",
+        data.rm.id(),
+        data.rn.id(),
+        data.rd.id(),
+    );
 }

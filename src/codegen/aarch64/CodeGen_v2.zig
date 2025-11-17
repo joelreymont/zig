@@ -771,36 +771,54 @@ fn airAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
     const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
     const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
-    // Allocate destination register
-    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    // Check if this is a float operation
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
 
-    // Generate ADD instruction
-    switch (rhs) {
-        .immediate => |imm| {
-            // ADD Xd, Xn, #imm
-            try self.addInst(.{
-                .tag = .add,
-                .ops = .rri,
-                .data = .{ .rri = .{
-                    .rd = dst_reg,
-                    .rn = lhs.register,
-                    .imm = imm,
-                } },
-            });
-        },
-        .register => |rhs_reg| {
-            // ADD Xd, Xn, Xm
-            try self.addInst(.{
-                .tag = .add,
-                .ops = .rrr,
-                .data = .{ .rrr = .{
-                    .rd = dst_reg,
-                    .rn = lhs.register,
-                    .rm = rhs_reg,
-                } },
-            });
-        },
-        else => return error.CodegenFail,
+    // Allocate destination register
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    if (is_float) {
+        // FADD Dd, Dn, Dm (floating point add)
+        try self.addInst(.{
+            .tag = .fadd,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+            } },
+        });
+    } else {
+        // Integer ADD instruction
+        switch (rhs) {
+            .immediate => |imm| {
+                // ADD Xd, Xn, #imm
+                try self.addInst(.{
+                    .tag = .add,
+                    .ops = .rri,
+                    .data = .{ .rri = .{
+                        .rd = dst_reg,
+                        .rn = lhs.register,
+                        .imm = imm,
+                    } },
+                });
+            },
+            .register => |rhs_reg| {
+                // ADD Xd, Xn, Xm
+                try self.addInst(.{
+                    .tag = .add,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = dst_reg,
+                        .rn = lhs.register,
+                        .rm = rhs_reg,
+                    } },
+                });
+            },
+            else => return error.CodegenFail,
+        }
     }
 
     // Track result
@@ -813,32 +831,51 @@ fn airSub(self: *CodeGen, inst: Air.Inst.Index) !void {
     const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
     const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
-    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    // Check if this is a float operation
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
 
-    switch (rhs) {
-        .immediate => |imm| {
-            try self.addInst(.{
-                .tag = .sub,
-                .ops = .rri,
-                .data = .{ .rri = .{
-                    .rd = dst_reg,
-                    .rn = lhs.register,
-                    .imm = imm,
-                } },
-            });
-        },
-        .register => |rhs_reg| {
-            try self.addInst(.{
-                .tag = .sub,
-                .ops = .rrr,
-                .data = .{ .rrr = .{
-                    .rd = dst_reg,
-                    .rn = lhs.register,
-                    .rm = rhs_reg,
-                } },
-            });
-        },
-        else => return error.CodegenFail,
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    if (is_float) {
+        // FSUB Dd, Dn, Dm (floating point subtract)
+        try self.addInst(.{
+            .tag = .fsub,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+            } },
+        });
+    } else {
+        // Integer SUB instruction
+        switch (rhs) {
+            .immediate => |imm| {
+                try self.addInst(.{
+                    .tag = .sub,
+                    .ops = .rri,
+                    .data = .{ .rri = .{
+                        .rd = dst_reg,
+                        .rn = lhs.register,
+                        .imm = imm,
+                    } },
+                });
+            },
+            .register => |rhs_reg| {
+                try self.addInst(.{
+                    .tag = .sub,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = dst_reg,
+                        .rn = lhs.register,
+                        .rm = rhs_reg,
+                    } },
+                });
+            },
+            else => return error.CodegenFail,
+        }
     }
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
@@ -850,10 +887,16 @@ fn airMul(self: *CodeGen, inst: Air.Inst.Index) !void {
     const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
     const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
-    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    // Check if this is a float operation
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
 
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    const tag: Mir.Inst.Tag = if (is_float) .fmul else .mul;
     try self.addInst(.{
-        .tag = .mul,
+        .tag = tag,
         .ops = .rrr,
         .data = .{ .rrr = .{
             .rd = dst_reg,
@@ -1255,22 +1298,40 @@ fn airDiv(self: *CodeGen, inst: Air.Inst.Index) !void {
     const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
     const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
-    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    // Check if this is a float operation
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
 
-    // Determine if signed or unsigned division
-    const lhs_ty = self.typeOf(bin_op.lhs);
-    const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
 
-    // ARM64: SDIV Xd, Xn, Xm (signed) or UDIV Xd, Xn, Xm (unsigned)
-    try self.addInst(.{
-        .tag = if (is_signed) .sdiv else .udiv,
-        .ops = .rrr,
-        .data = .{ .rrr = .{
-            .rd = dst_reg,
-            .rn = lhs.register,
-            .rm = rhs.register,
-        } },
-    });
+    if (is_float) {
+        // FDIV Dd, Dn, Dm (floating point divide)
+        try self.addInst(.{
+            .tag = .fdiv,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+            } },
+        });
+    } else {
+        // Determine if signed or unsigned division
+        const lhs_ty = self.typeOf(bin_op.lhs);
+        const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
+
+        // ARM64: SDIV Xd, Xn, Xm (signed) or UDIV Xd, Xn, Xm (unsigned)
+        try self.addInst(.{
+            .tag = if (is_signed) .sdiv else .udiv,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+            } },
+        });
+    }
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
