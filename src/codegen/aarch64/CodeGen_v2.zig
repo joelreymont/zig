@@ -685,7 +685,7 @@ fn genEpilogue(self: *CodeGen) !void {
     });
 }
 
-fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ CodegenFail, OutOfMemory }!void {
+fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ CodegenFail, OutOfMemory, OutOfRegisters }!void {
     return switch (tag) {
         // Arithmetic
         .add => self.airAdd(inst),
