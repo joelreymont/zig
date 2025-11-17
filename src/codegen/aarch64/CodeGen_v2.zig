@@ -668,8 +668,8 @@ fn genEpilogue(self: *CodeGen) !void {
         .ops = .mrr,
         .data = .{ .mrr = .{
             .mem = .{
-                .base = .{ .reg = .sp },
-                .mod = .{ .post_index = 16 },
+                .base = .sp,
+                .offset = .{ .post_index = 16 },
             },
             .r1 = .x29,
             .r2 = .x30,
@@ -737,9 +737,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
         .block => self.airBlock(inst),
 
         // No-ops
-        .dbg_stmt => .{},
-        .dbg_inline_block => .{},
-        .dbg_var_ptr, .dbg_var_val => .{},
+        .dbg_stmt => {},
+        .dbg_inline_block => {},
+        .dbg_var_ptr, .dbg_var_val => {},
 
         else => {
             log.err("TODO: ARM64 CodeGen {s}", .{@tagName(tag)});
@@ -1047,7 +1047,7 @@ fn airBr(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airCondBr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const pl_op = self.air.instructions.items(.data)[@intFromEnum(inst)].pl_op;
-    const cond = try self.resolveInst(pl_op.operand);
+    const cond = try self.resolveInst(pl_op.operand.toIndex().?);
     const extra = self.air.extraData(Air.CondBr, pl_op.payload);
     const then_body: []const Air.Inst.Index =
         @ptrCast(self.air.extra.items[extra.end..][0..extra.data.then_body_len]);
@@ -1161,7 +1161,7 @@ fn airDiv(self: *CodeGen, inst: Air.Inst.Index) !void {
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     // Determine if signed or unsigned division
-    const lhs_ty = self.typeOf(bin_op.lhs);
+    const lhs_ty = self.typeOf(bin_op.lhs.toIndex().?);
     const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
 
     // ARM64: SDIV Xd, Xn, Xm (signed) or UDIV Xd, Xn, Xm (unsigned)
@@ -1189,7 +1189,7 @@ fn airRem(self: *CodeGen, inst: Air.Inst.Index) !void {
     const tmp_reg = try self.register_manager.allocReg(inst, .gp);
     defer self.register_manager.freeReg(tmp_reg);
 
-    const lhs_ty = self.typeOf(bin_op.lhs);
+    const lhs_ty = self.typeOf(bin_op.lhs.toIndex().?);
     const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
 
     // tmp = lhs / rhs
@@ -1246,7 +1246,7 @@ fn airNeg(self: *CodeGen, inst: Air.Inst.Index) !void {
         .ops = .rr,
         .data = .{ .rr = .{
             .rd = dst_reg,
-            .rm = operand.register,
+            .rn = operand.register,
         } },
     });
 
@@ -1265,7 +1265,7 @@ fn airNot(self: *CodeGen, inst: Air.Inst.Index) !void {
         .ops = .rr,
         .data = .{ .rr = .{
             .rd = dst_reg,
-            .rm = operand.register,
+            .rn = operand.register,
         } },
     });
 
@@ -1276,7 +1276,7 @@ fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
     const operand = try self.resolveInst(ty_op.operand.toIndex().?);
     const dest_ty = self.typeOfIndex(inst);
-    const src_ty = self.typeOf(ty_op.operand);
+    const src_ty = self.typeOf(ty_op.operand.toIndex().?);
 
     const zcu = self.pt.zcu;
     const dest_bits = dest_ty.bitSize(zcu);
@@ -1370,7 +1370,7 @@ fn airTrunc(self: *CodeGen, inst: Air.Inst.Index) !void {
         .ops = .rr,
         .data = .{ .rr = .{
             .rd = dst_reg,
-            .rm = narrow_reg,
+            .rn = narrow_reg,
         } },
     });
 
@@ -1478,7 +1478,7 @@ fn typeOf(self: *CodeGen, inst: Air.Inst.Index) Type {
 }
 
 fn typeOfIndex(self: *CodeGen, inst: Air.Inst.Index) Type {
-    return self.air.typeOfIndex(inst);
+    return self.air.typeOfIndex(inst, &self.pt.zcu.intern_pool);
 }
 
 // ============================================================================
