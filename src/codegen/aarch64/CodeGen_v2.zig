@@ -118,6 +118,9 @@ frame_allocs: std.MultiArrayList(FrameAlloc) = .empty,
 free_frame_indices: std.AutoArrayHashMapUnmanaged(FrameIndex, void) = .empty,
 frame_locs: std.MultiArrayList(Mir.FrameLoc) = .empty,
 
+/// Stack offset for spills (grows downward from frame pointer)
+stack_offset: u32 = 0,
+
 // ============================================================================
 // Machine Code Value - where a value lives
 // ============================================================================
@@ -595,10 +598,6 @@ fn genPrologue(self: *CodeGen) !void {
     // For naked functions, skip prologue
     if (cc == .naked) return;
 
-    // TODO: Calculate actual frame size based on locals and spills
-    // For now, use a minimal frame
-    const frame_size: u16 = 16; // Space for FP and LR
-
     // Save FP (X29) and LR (X30) to stack, pre-decrement SP
     // STP X29, X30, [SP, #-16]!
     try self.addInst(.{
@@ -607,7 +606,7 @@ fn genPrologue(self: *CodeGen) !void {
         .data = .{ .mrr = .{
             .addr = .{
                 .base = .{ .reg = .sp },
-                .mod = .{ .pre_index = -@as(i9, @intCast(frame_size)) },
+                .mod = .{ .pre_index = -16 },
             },
             .r1 = .x29,
             .r2 = .x30,
@@ -625,9 +624,10 @@ fn genPrologue(self: *CodeGen) !void {
         } },
     });
 
-    // TODO: Allocate additional stack space if needed
-    // SUB SP, SP, #size
-    // For now, the frame_size in STP is enough
+    // Reserve placeholder for stack space allocation
+    // This will be patched after we know total stack_offset
+    // SUB SP, SP, #stack_size (filled in epilogue)
+    // For now, stack space for spills grows from frame pointer
 }
 
 /// Generate function epilogue
@@ -1490,4 +1490,116 @@ fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{Codege
     log.err(format, args);
     _ = self;
     return error.CodegenFail;
+}
+
+// ============================================================================
+// Register Spilling
+// ============================================================================
+
+/// Allocate a register, spilling if necessary
+fn allocRegOrSpill(self: *CodeGen, inst: Air.Inst.Index, reg_class: abi.RegisterClass) !Register {
+    return self.register_manager.allocReg(inst, reg_class) catch {
+        // Out of registers, need to spill one
+        const spill_reg = try self.findSpillCandidate(reg_class);
+        try self.spillReg(spill_reg);
+        return self.register_manager.allocReg(inst, reg_class);
+    };
+}
+
+/// Find a register to spill (heuristic: find oldest allocation)
+fn findSpillCandidate(self: *CodeGen, reg_class: abi.RegisterClass) !Register {
+    const regs = switch (reg_class) {
+        .gp => &abi.caller_preserved_gp_regs,
+        .vector => &abi.caller_preserved_fp_regs,
+    };
+
+    // Simple heuristic: spill the first allocated register
+    // TODO: Use better heuristics (LRU, furthest next use, etc.)
+    for (regs) |reg| {
+        if (self.register_manager.getRegOwner(reg)) |_| {
+            return reg;
+        }
+    }
+
+    return error.OutOfRegisters;
+}
+
+/// Spill a register to stack
+fn spillReg(self: *CodeGen, reg: Register) !void {
+    const owner = self.register_manager.getRegOwner(reg) orelse return;
+    const tracking = self.inst_tracking.getPtr(owner) orelse return;
+
+    // Allocate stack space for the spill (8 bytes for GP, 16 for vector)
+    const spill_size: u32 = switch (reg.class()) {
+        .general_purpose => 8,
+        .vector => 16,
+        .special => return error.CannotSpillSpecialRegister,
+    };
+
+    // Align stack offset
+    self.stack_offset = std.mem.alignForward(u32, self.stack_offset, spill_size);
+    const spill_offset = self.stack_offset;
+    self.stack_offset += spill_size;
+
+    // Store register to stack: STR Xn, [X29, #-offset]
+    // (Store relative to frame pointer)
+    try self.addInst(.{
+        .tag = .str,
+        .ops = .mr,
+        .data = .{ .mr = .{
+            .addr = .{
+                .base = .{ .reg = .x29 }, // Frame pointer
+                .mod = .{ .immediate = -@as(i32, @intCast(spill_offset)) },
+            },
+            .reg = reg,
+        } },
+    });
+
+    // Emit pseudo-instruction for debug info
+    if (!self.mod.strip) {
+        try self.addInst(.{
+            .tag = .pseudo_spill,
+            .ops = .none,
+            .data = .{ .none = {} },
+        });
+    }
+
+    // Update tracking to indicate value is on stack
+    tracking.long = .{ .load_frame = .{
+        .index = .stack_frame,
+        .off = spill_offset,
+    } };
+
+    // Free the register
+    self.register_manager.freeReg(reg);
+}
+
+/// Reload a value from stack to register
+fn reloadReg(self: *CodeGen, inst: Air.Inst.Index, frame_addr: bits.FrameAddr) !Register {
+    const reg_class: abi.RegisterClass = .gp; // TODO: Determine from type
+    const reg = try self.allocRegOrSpill(inst, reg_class);
+
+    // Load from stack: LDR Xn, [X29, #-offset]
+    try self.addInst(.{
+        .tag = .ldr,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .reg = reg,
+            .addr = .{
+                .base = .{ .reg = .x29 }, // Frame pointer
+                .mod = .{ .immediate = -@as(i32, @intCast(frame_addr.off)) },
+            },
+        } },
+    });
+
+    // Emit pseudo-instruction for debug info
+    if (!self.mod.strip) {
+        try self.addInst(.{
+            .tag = .pseudo_reload,
+            .ops = .none,
+            .data = .{ .none = {} },
+        });
+    }
+
+    return reg;
 }
