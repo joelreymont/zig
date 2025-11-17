@@ -729,6 +729,10 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .load => self.airLoad(inst),
         .store => self.airStore(inst),
 
+        // Memory operations
+        .memset => self.airMemset(inst),
+        .memcpy => self.airMemcpy(inst),
+
         // Compare
         .cmp_eq, .cmp_neq, .cmp_lt, .cmp_lte, .cmp_gt, .cmp_gte => self.airCmp(inst),
 
@@ -3436,6 +3440,20 @@ fn airSliceLen(self: *CodeGen, inst: Air.Inst.Index) !void {
     };
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = len_reg }));
+}
+
+fn airMemset(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // Memset requires loop generation and optimal instruction selection
+    // based on size and alignment (STP for bulk copies, STRB for single bytes)
+    _ = inst;
+    return self.fail("TODO: memset requires loop generation and bulk store implementation", .{});
+}
+
+fn airMemcpy(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // Memcpy requires loop generation and optimal instruction selection
+    // based on size and alignment (LDP/STP for bulk copies)
+    _ = inst;
+    return self.fail("TODO: memcpy requires loop generation and bulk load/store implementation", .{});
 }
 
 // ============================================================================
