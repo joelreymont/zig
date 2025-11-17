@@ -685,7 +685,7 @@ fn genEpilogue(self: *CodeGen) !void {
     });
 }
 
-fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
+fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ CodegenFail, OutOfMemory }!void {
     return switch (tag) {
         // Arithmetic
         .add => self.airAdd(inst),
@@ -1161,7 +1161,7 @@ fn airDiv(self: *CodeGen, inst: Air.Inst.Index) !void {
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     // Determine if signed or unsigned division
-    const lhs_ty = self.typeOf(bin_op.lhs.toIndex().?);
+    const lhs_ty = self.typeOf(bin_op.lhs);
     const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
 
     // ARM64: SDIV Xd, Xn, Xm (signed) or UDIV Xd, Xn, Xm (unsigned)
@@ -1189,7 +1189,7 @@ fn airRem(self: *CodeGen, inst: Air.Inst.Index) !void {
     const tmp_reg = try self.register_manager.allocReg(inst, .gp);
     defer self.register_manager.freeReg(tmp_reg);
 
-    const lhs_ty = self.typeOf(bin_op.lhs.toIndex().?);
+    const lhs_ty = self.typeOf(bin_op.lhs);
     const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
 
     // tmp = lhs / rhs
@@ -1276,7 +1276,7 @@ fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
     const operand = try self.resolveInst(ty_op.operand.toIndex().?);
     const dest_ty = self.typeOfIndex(inst);
-    const src_ty = self.typeOf(ty_op.operand.toIndex().?);
+    const src_ty = self.typeOf(ty_op.operand);
 
     const zcu = self.pt.zcu;
     const dest_bits = dest_ty.bitSize(zcu);
@@ -1298,7 +1298,7 @@ fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
             .ops = .rr,
             .data = .{ .rr = .{
                 .rd = dst_reg,
-                .rm = narrow_reg,
+                .rn = narrow_reg,
             } },
         });
     } else {
@@ -1472,9 +1472,8 @@ fn addInst(self: *CodeGen, inst: Mir.Inst) !void {
     try self.mir_instructions.append(self.gpa, inst);
 }
 
-fn typeOf(self: *CodeGen, inst: Air.Inst.Index) Type {
-    const air_tags = self.air.instructions.items(.tag);
-    return self.air.typeOf(inst, air_tags[@intFromEnum(inst)]);
+fn typeOf(self: *CodeGen, inst: Air.Inst.Ref) Type {
+    return self.air.typeOf(inst, &self.pt.zcu.intern_pool);
 }
 
 fn typeOfIndex(self: *CodeGen, inst: Air.Inst.Index) Type {
