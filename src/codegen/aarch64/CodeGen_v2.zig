@@ -755,8 +755,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
 fn airAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
 
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     // Allocate destination register
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
@@ -797,8 +797,8 @@ fn airAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
 fn airSub(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
 
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
@@ -834,8 +834,8 @@ fn airSub(self: *CodeGen, inst: Air.Inst.Index) !void {
 fn airMul(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
 
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
@@ -854,8 +854,8 @@ fn airMul(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airAnd(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     try self.addInst(.{
@@ -873,8 +873,8 @@ fn airAnd(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airOr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     try self.addInst(.{
@@ -892,8 +892,8 @@ fn airOr(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airXor(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     try self.addInst(.{
@@ -911,8 +911,8 @@ fn airXor(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airShl(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     try self.addInst(.{
@@ -930,8 +930,8 @@ fn airShl(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airShr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     // TODO: Check if signed or unsigned
@@ -950,7 +950,7 @@ fn airShr(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const ptr = try self.resolveInst(ty_op.operand);
+    const ptr = try self.resolveInst(ty_op.operand.toIndex().?);
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
     try self.addInst(.{
@@ -967,8 +967,8 @@ fn airLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airStore(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const ptr = try self.resolveInst(bin_op.lhs);
-    const val = try self.resolveInst(bin_op.rhs);
+    const ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const val = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     try self.addInst(.{
         .tag = .str,
@@ -982,8 +982,8 @@ fn airStore(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airCmp(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     // CMP sets condition flags
     try self.addInst(.{
@@ -1155,8 +1155,8 @@ fn genBody(self: *CodeGen, body: []const Air.Inst.Index) !void {
 
 fn airDiv(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
@@ -1182,8 +1182,8 @@ fn airRem(self: *CodeGen, inst: Air.Inst.Index) !void {
     // ARM64 doesn't have a remainder instruction
     // We need to compute: rem = lhs - (lhs / rhs) * rhs
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const lhs = try self.resolveInst(bin_op.lhs);
-    const rhs = try self.resolveInst(bin_op.rhs);
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
     const tmp_reg = try self.register_manager.allocReg(inst, .gp);
@@ -1236,7 +1236,7 @@ fn airMod(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airNeg(self: *CodeGen, inst: Air.Inst.Index) !void {
     const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
-    const operand = try self.resolveInst(un_op);
+    const operand = try self.resolveInst(un_op.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
@@ -1255,7 +1255,7 @@ fn airNeg(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airNot(self: *CodeGen, inst: Air.Inst.Index) !void {
     const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const operand = try self.resolveInst(un_op.operand);
+    const operand = try self.resolveInst(un_op.operand.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
@@ -1274,7 +1274,7 @@ fn airNot(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const operand = try self.resolveInst(ty_op.operand);
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
     const dest_ty = self.typeOfIndex(inst);
     const src_ty = self.typeOf(ty_op.operand);
 
@@ -1355,7 +1355,7 @@ fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airTrunc(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const operand = try self.resolveInst(ty_op.operand);
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
     const dest_ty = self.typeOfIndex(inst);
 
     const zcu = self.pt.zcu;
@@ -1387,8 +1387,8 @@ fn airBoolToInt(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const ptr = try self.resolveInst(bin_op.lhs);
-    const offset = try self.resolveInst(bin_op.rhs);
+    const ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const offset = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
