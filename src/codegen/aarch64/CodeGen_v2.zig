@@ -720,6 +720,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Compare
         .cmp_eq, .cmp_neq, .cmp_lt, .cmp_lte, .cmp_gt, .cmp_gte => self.airCmp(inst),
 
+        // Float operations
+        .sqrt, .neg, .abs => self.airUnaryFloatOp(inst),
+
         // Branches
         .br => self.airBr(inst),
         .cond_br => self.airCondBr(inst),
@@ -734,6 +737,10 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Type conversions
         .intcast => self.airIntCast(inst),
         .trunc => self.airTrunc(inst),
+        .fptrunc, .fpext => self.airFloatCast(inst),
+        .floatcast => self.airFloatCast(inst),
+        .intfromfloat => self.airIntFromFloat(inst),
+        .floatfromint => self.airFloatFromInt(inst),
 
         // Pointer operations
         .ptr_add => self.airPtrAdd(inst),
@@ -1889,28 +1896,86 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
     return self.fail("TODO: wrap_errunion_payload requires stack allocation and struct creation", .{});
 }
 
+fn airUnaryFloatOp(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const tag = self.air.instructions.items(.tag)[@intFromEnum(inst)];
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
+
+    const result_ty = self.typeOfIndex(inst);
+    const operand = try self.resolveInst(un_op.toIndex().?);
+
+    // Determine if this is actually a float operation
+    const is_float = result_ty.isRuntimeFloat();
+
+    if (!is_float) {
+        // Integer operations
+        if (tag == .neg) {
+            return self.airNeg(inst);
+        } else {
+            return self.fail("TODO: integer {} not implemented", .{tag});
+        }
+    }
+
+    // Allocate destination register
+    const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+    const mir_tag: Mir.Inst.Tag = switch (tag) {
+        .sqrt => .fsqrt,
+        .neg => .fneg,
+        .abs => .fabs,
+        else => unreachable,
+    };
+
+    try self.addInst(.{
+        .tag = mir_tag,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
 fn airCmp(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
     const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
     const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
 
-    // CMP sets condition flags
-    try self.addInst(.{
-        .tag = .cmp,
-        .ops = .rr,
-        .data = .{ .rr = .{
-            .rd = lhs.register,
-            .rn = rhs.register,
-        } },
-    });
+    // Check if this is a float comparison
+    const lhs_ty = self.typeOf(bin_op.lhs);
+    const is_float = lhs_ty.isRuntimeFloat();
 
-    // Result is in condition flags - will be used by conditional instructions
-    // For now, materialize to register using CSET
+    if (is_float) {
+        // Floating point comparison
+        // FCMP sets NZCV flags
+        try self.addInst(.{
+            .tag = .fcmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = lhs.register,
+                .rn = rhs.register,
+            } },
+        });
+    } else {
+        // Integer comparison
+        // CMP sets condition flags
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = lhs.register,
+                .rn = rhs.register,
+            } },
+        });
+    }
+
+    // Result is in condition flags - materialize to register using CSET
     const tag = self.air.instructions.items(.tag)[@intFromEnum(inst)];
     const cond: Condition = switch (tag) {
         .cmp_eq => .eq,
         .cmp_neq => .ne,
-        .cmp_lt => .lt,
+        .cmp_lt => if (is_float) .mi else .lt, // Float uses MI (minus/negative) for less than
         .cmp_lte => .le,
         .cmp_gt => .gt,
         .cmp_gte => .ge,
@@ -2382,6 +2447,97 @@ fn airTrunc(self: *CodeGen, inst: Air.Inst.Index) !void {
         .data = .{ .rr = .{
             .rd = dst_reg,
             .rn = narrow_reg,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airFloatCast(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const dest_ty = self.typeOfIndex(inst);
+    const src_ty = self.typeOf(ty_op.operand);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+    // FCVT converts between different float precisions
+    // The instruction automatically handles f16/f32/f64/f128 based on register size
+    // For now, simplified version - use FMOV if same size, FCVT if different
+    const zcu = self.pt.zcu;
+    const dest_bits = dest_ty.bitSize(zcu);
+    const src_bits = src_ty.bitSize(zcu);
+
+    if (dest_bits == src_bits) {
+        // Same size, just move
+        try self.addInst(.{
+            .tag = .fmov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    } else {
+        // Different size, use FCVT
+        try self.addInst(.{
+            .tag = .fcvt,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airIntFromFloat(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const dest_ty = self.typeOfIndex(inst);
+    const src_ty = self.typeOf(ty_op.operand);
+
+    const zcu = self.pt.zcu;
+    const is_signed = dest_ty.isSignedInt(zcu);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // FCVTZS (signed) or FCVTZU (unsigned) converts float to int, rounding toward zero
+    const tag: Mir.Inst.Tag = if (is_signed) .fcvtzs else .fcvtzu;
+
+    try self.addInst(.{
+        .tag = tag,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airFloatFromInt(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const src_ty = self.typeOf(ty_op.operand);
+
+    const zcu = self.pt.zcu;
+    const is_signed = src_ty.isSignedInt(zcu);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+    // SCVTF (signed) or UCVTF (unsigned) converts int to float
+    const tag: Mir.Inst.Tag = if (is_signed) .scvtf else .ucvtf;
+
+    try self.addInst(.{
+        .tag = tag,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
         } },
     });
 
