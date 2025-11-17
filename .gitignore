@@ -29,3 +29,7 @@ zig-cache/
 /zig2
 /zig2.c
 /config.zig
+/current_build.log
+/bootstrap.log
+/final_build.log
+/compiler_rt.c
