@@ -826,6 +826,14 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Bitcast
         .bitcast => self.airBitcast(inst),
 
+        // Atomic operations
+        .atomic_load => self.airAtomicLoad(inst),
+        .atomic_store_unordered => self.airAtomicStore(inst, .unordered),
+        .atomic_store_monotonic => self.airAtomicStore(inst, .monotonic),
+        .atomic_store_release => self.airAtomicStore(inst, .release),
+        .atomic_store_seq_cst => self.airAtomicStore(inst, .seq_cst),
+        .atomic_rmw => self.airAtomicRmw(inst),
+
         // No-ops
         .dbg_stmt => {},
         .dbg_inline_block => {},
@@ -3454,6 +3462,128 @@ fn airMemcpy(self: *CodeGen, inst: Air.Inst.Index) !void {
     // based on size and alignment (LDP/STP for bulk copies)
     _ = inst;
     return self.fail("TODO: memcpy requires loop generation and bulk load/store implementation", .{});
+}
+
+fn airAtomicLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const atomic_load = self.air.instructions.items(.data)[@intFromEnum(inst)].atomic_load;
+    const ptr = try self.resolveInst(atomic_load.ptr.toIndex().?);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ARM64 atomic load ideally uses LDAR (Load-Acquire Register)
+    // but MIR doesn't have LDAR/LDARB/LDARH yet, so we use LDR + DMB for acquire semantics
+    const ordering = atomic_load.order;
+
+    switch (ordering) {
+        .unordered, .monotonic => {
+            // Use regular load - no ordering guarantees needed
+            try self.addInst(.{
+                .tag = .ldr,
+                .ops = .rm,
+                .data = .{ .rm = .{
+                    .rd = dst_reg,
+                    .mem = Memory.simple(ptr.register, 0),
+                } },
+            });
+        },
+        .acquire, .seq_cst => {
+            // Load followed by DMB (Data Memory Barrier) for acquire semantics
+            try self.addInst(.{
+                .tag = .ldr,
+                .ops = .rm,
+                .data = .{ .rm = .{
+                    .rd = dst_reg,
+                    .mem = Memory.simple(ptr.register, 0),
+                } },
+            });
+
+            // DMB ISH - full memory barrier
+            try self.addInst(.{
+                .tag = .dmb,
+                .ops = .none,
+                .data = .{ .none = {} },
+            });
+        },
+        else => return self.fail("TODO: atomic_load with ordering {} not yet supported", .{ordering}),
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airAtomicStore(self: *CodeGen, inst: Air.Inst.Index, comptime ordering: std.builtin.AtomicOrder) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const value = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    // ARM64 atomic store ideally uses STLR (Store-Release Register)
+    // but MIR doesn't have STLR/STLRB/STLRH yet, so we use DMB + STR for release semantics
+
+    switch (ordering) {
+        .unordered, .monotonic => {
+            // Use regular store - no ordering guarantees needed
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(ptr.register, 0),
+                    .rs = value.register,
+                } },
+            });
+        },
+        .release, .seq_cst => {
+            // DMB followed by store for release semantics
+            // DMB ISH - full memory barrier
+            try self.addInst(.{
+                .tag = .dmb,
+                .ops = .none,
+                .data = .{ .none = {} },
+            });
+
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(ptr.register, 0),
+                    .rs = value.register,
+                } },
+            });
+        },
+        else => return self.fail("TODO: atomic_store with ordering {} not yet supported", .{ordering}),
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .none = {} }));
+}
+
+fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // ARM64 has atomic RMW operations: LDADD, LDCLR, LDEOR, LDSET, etc.
+    // These are ARMv8.1-A LSE (Large System Extensions) instructions
+    // For compatibility, we may need to use LDXR/STXR loop for older cores
+    _ = inst;
+    return self.fail("TODO: atomic_rmw requires LDXR/STXR loop or LSE instructions", .{});
+}
+
+fn airFence(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const atomic_order = self.air.instructions.items(.data)[@intFromEnum(inst)].fence;
+
+    // ARM64 memory barriers:
+    // DMB ISH - Data Memory Barrier, Inner Shareable domain
+    // DSB ISH - Data Synchronization Barrier, Inner Shareable domain
+
+    switch (atomic_order) {
+        .unordered, .monotonic => {
+            // No barrier needed
+        },
+        .acquire, .release, .acq_rel, .seq_cst => {
+            // DMB ISH - full memory barrier
+            try self.addInst(.{
+                .tag = .dmb,
+                .ops = .none,
+                .data = .{ .none = {} },
+            });
+        },
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .none = {} }));
 }
 
 // ============================================================================
