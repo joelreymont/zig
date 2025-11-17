@@ -714,6 +714,10 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .ctz => self.airCtz(inst),
         .popcount => self.airPopcount(inst),
 
+        // Boolean operations
+        .bool_and => self.airBoolAnd(inst),
+        .bool_or => self.airBoolOr(inst),
+
         // Shifts
         .shl, .shl_exact => self.airShl(inst),
         .shr, .shr_exact => self.airShr(inst),
@@ -729,7 +733,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .select => self.airSelect(inst),
 
         // Float operations
-        .sqrt, .neg, .abs => self.airUnaryFloatOp(inst),
+        .sqrt, .abs => self.airUnaryFloatOp(inst),
 
         // Branches
         .br => self.airBr(inst),
@@ -746,9 +750,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .intcast => self.airIntCast(inst),
         .trunc => self.airTrunc(inst),
         .fptrunc, .fpext => self.airFloatCast(inst),
-        .floatcast => self.airFloatCast(inst),
-        .intfromfloat => self.airIntFromFloat(inst),
-        .floatfromint => self.airFloatFromInt(inst),
+        .int_from_float => self.airIntFromFloat(inst),
+        .float_from_int => self.airFloatFromInt(inst),
 
         // Pointer operations
         .ptr_add => self.airPtrAdd(inst),
@@ -770,6 +773,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .array_elem_val => self.airArrayElemVal(inst),
 
         // Slice operations
+        .slice => self.airSlice(inst),
         .slice_ptr => self.airSlicePtr(inst),
         .slice_len => self.airSliceLen(inst),
 
@@ -788,6 +792,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .unwrap_errunion_payload => self.airUnwrapErrUnionPayload(inst),
         .unwrap_errunion_err => self.airUnwrapErrUnionErr(inst),
         .wrap_errunion_payload => self.airWrapErrUnionPayload(inst),
+
+        // Union operations
+        .get_union_tag => self.airGetUnionTag(inst),
 
         // Blocks
         .block => self.airBlock(inst),
@@ -1857,7 +1864,6 @@ fn airIsErr(self: *CodeGen, inst: Air.Inst.Index, comptime is_err: bool) !void {
 
 fn airUnwrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const err_union_ty = self.typeOf(ty_op.operand);
     const payload_ty = ty_op.ty.toType();
     const zcu = self.pt.zcu;
 
@@ -1907,6 +1913,7 @@ fn airUnwrapErrUnionErr(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 
 fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
+    _ = inst;
     // Wrapping a payload in an error union requires creating the struct
     // with error = 0 and payload = value
     // This typically requires stack allocation
@@ -2375,19 +2382,33 @@ fn airMinMax(self: *CodeGen, inst: Air.Inst.Index, comptime is_min: bool) !void 
     const is_float = result_ty.isRuntimeFloat();
 
     if (is_float) {
-        // Floating point min/max
-        const reg_class: abi.RegisterClass = .vector;
-        const dst_reg = try self.register_manager.allocReg(inst, reg_class);
-
-        const tag: Mir.Inst.Tag = if (is_min) .fmin else .fmax;
+        // Floating point min/max using FCMP + CSEL
+        // FCMP lhs, rhs
+        // CSEL dst, lhs, rhs, <condition>
 
         try self.addInst(.{
-            .tag = tag,
-            .ops = .rrr,
-            .data = .{ .rrr = .{
+            .tag = .fcmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = lhs.register,
+                .rn = rhs.register,
+            } },
+        });
+
+        const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+        // For min: select lhs if lhs < rhs (LT/MI), else rhs
+        // For max: select lhs if lhs > rhs (GT), else rhs
+        const cond: Condition = if (is_min) .mi else .gt; // MI = less than for floats, GT = greater than
+
+        try self.addInst(.{
+            .tag = .csel,
+            .ops = .rrrc,
+            .data = .{ .rrrc = .{
                 .rd = dst_reg,
                 .rn = lhs.register,
                 .rm = rhs.register,
+                .cond = cond,
             } },
         });
 
@@ -2459,60 +2480,40 @@ fn airCtz(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     // ARM64 doesn't have a CTZ instruction, but we can implement it as:
     // RBIT (reverse bits), then CLZ
+    // We can reuse dst_reg to avoid needing a temporary
 
-    const temp_reg = try self.register_manager.allocReg(null, .gp);
-
-    // RBIT temp, operand - Reverse bit order
+    // RBIT dst, operand - Reverse bit order
     try self.addInst(.{
         .tag = .rbit,
         .ops = .rr,
         .data = .{ .rr = .{
-            .rd = temp_reg,
+            .rd = dst_reg,
             .rn = operand.register,
         } },
     });
 
-    // CLZ dst, temp - Count leading zeros (which are trailing zeros in original)
+    // CLZ dst, dst - Count leading zeros (which are trailing zeros in original)
     try self.addInst(.{
         .tag = .clz,
         .ops = .rr,
         .data = .{ .rr = .{
             .rd = dst_reg,
-            .rn = temp_reg,
+            .rn = dst_reg,
         } },
     });
-
-    self.register_manager.freeReg(temp_reg);
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
 
 fn airPopcount(self: *CodeGen, inst: Air.Inst.Index) !void {
-    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const operand = try self.resolveInst(un_op.operand.toIndex().?);
-
+    _ = inst;
     // ARM64 has NEON instruction CNT (count bits), but it works on vector registers
     // For scalar, we need to:
-    // 1. Move to vector register
-    // 2. Use CNT (count bits in each byte)
+    // 1. Move to vector register (FMOV Dd, Xn)
+    // 2. Use CNT Vd.8B, Vn.8B (count bits in each byte)
     // 3. Use ADDV to sum all bytes
     // 4. Move back to general purpose register
-
-    const vec_reg = try self.register_manager.allocReg(null, .vector);
-
-    // FMOV Dd, Xn - Move from GP to vector
-    try self.addInst(.{
-        .tag = .fmov,
-        .ops = .rr,
-        .data = .{ .rr = .{
-            .rd = vec_reg,
-            .rn = operand.register,
-        } },
-    });
-
-    // CNT Vd.8B, Vn.8B - Count bits in each byte
-    // Note: This is simplified; actual encoding needs vector arrangement
-    // For now, mark as TODO and use a simpler approach
+    // This requires full NEON vector arrangement encoding which is not yet implemented
     return self.fail("TODO: popcount requires NEON vector operations not yet fully implemented", .{});
 }
 
@@ -2709,7 +2710,6 @@ fn airIntFromFloat(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
     const operand = try self.resolveInst(ty_op.operand.toIndex().?);
     const dest_ty = self.typeOfIndex(inst);
-    const src_ty = self.typeOf(ty_op.operand);
 
     const zcu = self.pt.zcu;
     const is_signed = dest_ty.isSignedInt(zcu);
@@ -2785,7 +2785,6 @@ fn airArg(self: *CodeGen, inst: Air.Inst.Index) !void {
     }
 
     // Determine which register the argument is in
-    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
     const src_reg = if (is_float)
         // Float args in V0-V7 (D0-D7)
         Register.v0.offset(@intCast(arg_index))
@@ -2819,7 +2818,6 @@ fn airBitcast(self: *CodeGen, inst: Air.Inst.Index) !void {
     const dest_ty = self.typeOfIndex(inst);
     const src_ty = self.typeOf(ty_op.operand);
 
-    const zcu = self.pt.zcu;
     const dest_is_float = dest_ty.isRuntimeFloat();
     const src_is_float = src_ty.isRuntimeFloat();
 
@@ -2855,6 +2853,162 @@ fn airBitcast(self: *CodeGen, inst: Air.Inst.Index) !void {
         // Same register class, just track the same value
         try self.inst_tracking.put(self.gpa, inst, .init(operand));
     }
+}
+
+fn airBoolAnd(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // AND Xd, Xn, Xm (boolean AND - same as bitwise AND for bools)
+    try self.addInst(.{
+        .tag = .and_,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = lhs.register,
+            .rm = rhs.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airBoolOr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ORR Xd, Xn, Xm (boolean OR - same as bitwise OR for bools)
+    try self.addInst(.{
+        .tag = .orr,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = lhs.register,
+            .rm = rhs.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airGetUnionTag(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const union_ty = self.typeOf(ty_op.operand);
+
+    const zcu = self.pt.zcu;
+
+    // For tagged unions, the tag is typically stored at the beginning of the struct
+    // Get the layout to determine tag offset
+    const layout = union_ty.unionGetLayout(zcu);
+    const tag_size = layout.tag_size;
+
+    if (tag_size == 0) {
+        // Untagged union - no tag to get
+        return self.fail("Cannot get tag of untagged union", .{});
+    }
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Load the tag from memory
+    // The tag is at the union pointer + tag offset
+    const tag_off: i32 = @intCast(layout.tag_align.forward(layout.payload_size));
+
+    if (tag_off == 0) {
+        // Tag is at offset 0, just load it
+        try self.addInst(.{
+            .tag = if (tag_size <= 1) .ldrb else if (tag_size <= 2) .ldrh else .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = .{
+                    .base = .{ .reg = operand.register },
+                    .mod = .{ .immediate = 0 },
+                },
+            } },
+        });
+    } else {
+        // Tag is at non-zero offset
+        try self.addInst(.{
+            .tag = if (tag_size <= 1) .ldrb else if (tag_size <= 2) .ldrh else .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = .{
+                    .base = .{ .reg = operand.register },
+                    .mod = .{ .immediate = tag_off },
+                },
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const bin = self.air.extraData(Air.Bin, ty_pl.payload).data;
+    const ptr = try self.resolveInst(bin.lhs.toIndex().?);
+    const len = try self.resolveInst(bin.rhs.toIndex().?);
+
+    // A slice is a struct with two fields: ptr and len
+    // We need to create this on the stack and return a pointer to it
+
+    const slice_ty = self.typeOfIndex(inst);
+    const zcu = self.pt.zcu;
+    const slice_size = slice_ty.abiSize(zcu);
+    const slice_align = slice_ty.abiAlignment(zcu);
+
+    // Allocate stack space for the slice
+    const stack_offset = try self.allocStackSpace(@intCast(slice_size), slice_align);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Get stack pointer into dst_reg
+    // SUB Xd, X29, #offset
+    try self.addInst(.{
+        .tag = .sub,
+        .ops = .rri,
+        .data = .{ .rri = .{
+            .rd = dst_reg,
+            .rn = .x29, // Frame pointer
+            .imm = @intCast(stack_offset),
+        } },
+    });
+
+    // Store ptr field (first 8 bytes)
+    try self.addInst(.{
+        .tag = .str,
+        .ops = .mr,
+        .data = .{ .mr = .{
+            .mem = .{
+                .base = .{ .reg = dst_reg },
+                .mod = .{ .immediate = 0 },
+            },
+            .rs = ptr.register,
+        } },
+    });
+
+    // Store len field (second 8 bytes)
+    try self.addInst(.{
+        .tag = .str,
+        .ops = .mr,
+        .data = .{ .mr = .{
+            .mem = .{
+                .base = .{ .reg = dst_reg },
+                .mod = .{ .immediate = 8 },
+            },
+            .rs = len.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
 
 fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
