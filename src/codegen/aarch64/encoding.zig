@@ -16546,6 +16546,407 @@ pub const Instruction = packed union {
         std.mem.writeInt(Backing, mem, @bitCast(inst), .little);
     }
 
+    // ========================================================================
+    // Low-level encoding helper functions for code generation
+    // ========================================================================
+
+    /// Create unconditional branch immediate instruction (B or BL)
+    pub fn unconditionalBranchImmediate(op: BranchExceptionGeneratingSystem.UnconditionalBranchImmediate.Op, offset: i26) Instruction {
+        return .{ .branch_exception_generating_system = .{ .unconditional_branch_immediate = switch (op) {
+            .b => .{ .b = .{ .imm26 = offset } },
+            .bl => .{ .bl = .{ .imm26 = offset } },
+        } } };
+    }
+
+    /// Create unconditional branch register instruction (BR, BLR, RET)
+    pub fn unconditionalBranchRegister(
+        comptime op: []const u8,
+        a: bool,
+        m: bool,
+        rn: u5,
+        rm: u5,
+    ) Instruction {
+        if (std.mem.eql(u8, op, "br")) {
+            return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
+                .br = .{ .A = a, .M = m, .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm) },
+            } } };
+        } else if (std.mem.eql(u8, op, "blr")) {
+            return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
+                .blr = .{ .A = a, .M = m, .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm) },
+            } } };
+        } else if (std.mem.eql(u8, op, "ret")) {
+            return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
+                .ret = .{ .Rn = @enumFromInt(rn) },
+            } } };
+        }
+        unreachable; // Invalid unconditional branch register op
+    }
+
+    /// Create conditional branch immediate instruction (B.cond)
+    pub fn conditionalBranchImmediate(offset: i19, cond: ConditionCode) Instruction {
+        return .{ .branch_exception_generating_system = .{ .conditional_branch_immediate = .{
+            .b = .{ .imm19 = offset, .cond = cond },
+        } } };
+    }
+
+    /// Create compare and branch immediate instruction (CBZ, CBNZ)
+    pub fn compareAndBranchImmediate(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        offset: i19,
+        rt: u5,
+    ) Instruction {
+        if (std.mem.eql(u8, op, "cbz")) {
+            return .{ .branch_exception_generating_system = .{ .compare_branch_immediate = .{
+                .cbz = .{ .Rt = @enumFromInt(rt), .imm19 = offset, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "cbnz")) {
+            return .{ .branch_exception_generating_system = .{ .compare_branch_immediate = .{
+                .cbnz = .{ .Rt = @enumFromInt(rt), .imm19 = offset, .sf = sf },
+            } } };
+        } else {
+            unreachable; // Invalid compare and branch op
+        }
+    }
+
+    /// Create add/subtract shifted register instruction
+    pub fn addSubtractShiftedRegister(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        rd: u5,
+        rn: u5,
+        rm: u5,
+        shift: DataProcessingRegister.Shift.Op,
+        imm6: u6,
+        set_flags: bool,
+    ) Instruction {
+        const add_sub_op: AddSubtractOp = if (std.mem.eql(u8, op, "add") or std.mem.eql(u8, op, "adds"))
+            .add
+        else
+            .sub;
+
+        return .{ .data_processing_register = .{ .add_subtract_shifted_register = .{ .group = .{
+            .Rd = @enumFromInt(rd),
+            .Rn = @enumFromInt(rn),
+            .imm6 = imm6,
+            .Rm = @enumFromInt(rm),
+            .shift = shift,
+            .S = set_flags,
+            .op = add_sub_op,
+            .sf = sf,
+        } } } };
+    }
+
+    /// Create conditional select instruction (CSEL, CSINC, CSINV, CSNEG)
+    pub fn conditionalSelect(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        rd: u5,
+        rn: u5,
+        rm: u5,
+        cond: ConditionCode,
+    ) Instruction {
+        _ = DataProcessingRegister.ConditionalSelect; // Type exists but we don't need it here
+        if (std.mem.eql(u8, op, "csel")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csel = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "csinc")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csinc = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "csinv")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csinv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "csneg")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csneg = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
+            } } };
+        } else {
+            unreachable; // Invalid conditional select op
+        }
+    }
+
+    /// Create exception generation instruction (SVC, HVC, SMC, BRK, HLT)
+    pub fn exceptionGeneration(comptime op: []const u8, imm16: u16, opc: u3) Instruction {
+        if (std.mem.eql(u8, op, "brk")) {
+            return .{ .branch_exception_generating_system = .{ .exception_generating = .{
+                .brk = .{ .imm16 = imm16 },
+            } } };
+        } else if (std.mem.eql(u8, op, "hlt")) {
+            return .{ .branch_exception_generating_system = .{ .exception_generating = .{
+                .hlt = .{ .imm16 = imm16 },
+            } } };
+        } else if (std.mem.eql(u8, op, "svc")) {
+            return .{ .branch_exception_generating_system = .{ .exception_generating = .{
+                .svc = .{ .imm16 = imm16 },
+            } } };
+        } else {
+            _ = opc; // May be needed for other variants
+            unreachable; // Invalid exception generation op
+        }
+    }
+
+    /// Create barrier instruction (DMB, DSB, ISB)
+    pub fn barriers(comptime op: []const u8, option: BranchExceptionGeneratingSystem.Barriers.Option) Instruction {
+        if (std.mem.eql(u8, op, "dmb")) {
+            return .{ .branch_exception_generating_system = .{ .barriers = .{
+                .dmb = .{ .CRm = option },
+            } } };
+        } else if (std.mem.eql(u8, op, "dsb")) {
+            return .{ .branch_exception_generating_system = .{ .barriers = .{
+                .dsb = .{ .CRm = option },
+            } } };
+        } else if (std.mem.eql(u8, op, "isb")) {
+            return .{ .branch_exception_generating_system = .{ .barriers = .{
+                .isb = .{ .CRm = option },
+            } } };
+        } else {
+            unreachable; // Invalid barrier op
+        }
+    }
+
+    // ========================================================================
+    // Stubbed functions - to be implemented
+    // ========================================================================
+
+    /// Add/Subtract immediate (ADD, ADDS, SUB, SUBS with immediate)
+    pub fn addSubtractImmediate(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        rd: u5,
+        rn: u5,
+        imm12: u12,
+        shift: u2,
+        set_flags: bool,
+    ) Instruction {
+        const shift_enum: DataProcessingImmediate.AddSubtractImmediate.Shift = @enumFromInt(shift);
+        if (std.mem.eql(u8, op, "add")) {
+            if (set_flags) {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .adds = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            } else {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .add = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op, "sub")) {
+            if (set_flags) {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .subs = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            } else {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .sub = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            }
+        }
+        unreachable; // Invalid add/subtract immediate op
+    }
+
+    /// Data processing three source (MADD, MSUB, etc)
+    pub fn dataProcessingThreeSource(
+        sf: Register.GeneralSize,
+        opcode: u3,
+        rm: u5,
+        ra: u5,
+        rn: u5,
+        rd: u5,
+    ) Instruction {
+        // Determine which variant based on opcode
+        // opcode bits: op54 (bit 1), o0 (bit 0)
+        const o0: u1 = @truncate(opcode & 1);
+        const op54: u2 = @truncate((opcode >> 1) & 0b11);
+
+        if (op54 == 0b00) {
+            if (o0 == 0) {
+                return .{ .data_processing_register = .{ .data_processing_three_source = .{
+                    .madd = .{ .sf = sf, .Rm = @enumFromInt(rm), .Ra = @enumFromInt(ra), .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .data_processing_three_source = .{
+                    .msub = .{ .sf = sf, .Rm = @enumFromInt(rm), .Ra = @enumFromInt(ra), .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            }
+        } else {
+            // For other opcodes, default to MADD structure
+            return .{ .data_processing_register = .{ .data_processing_three_source = .{
+                .madd = .{ .sf = sf, .Rm = @enumFromInt(rm), .Ra = @enumFromInt(ra), .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+            } } };
+        }
+    }
+
+    /// Data processing two source (UDIV, SDIV, LSLV, etc)
+    pub fn dataProcessingTwoSource(
+        sf: Register.GeneralSize,
+        opcode: u6,
+        rm: u5,
+        rn: u5,
+        rd: u5,
+    ) Instruction {
+        // Dispatch based on opcode bits
+        // Bits [15:10] = opcode in the Group structure
+        // Bit [10] distinguishes between div ops and shift ops
+        const high_bits: u4 = @truncate(opcode >> 2);
+        const low_bits: u2 = @truncate(opcode & 0b11);
+
+        if (high_bits == 0b0000) {
+            // Division operations (UDIV, SDIV)
+            const div_op: DataProcessingRegister.DataProcessingTwoSource.DivOp = @enumFromInt(low_bits & 1);
+            if (div_op == .udiv) {
+                return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .udiv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .sdiv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } };
+            }
+        } else if (high_bits == 0b0010) {
+            // Shift operations (LSLV, LSRV, ASRV, RORV)
+            const shift_op: DataProcessingRegister.DataProcessingTwoSource.ShiftOp = @enumFromInt(low_bits);
+            switch (shift_op) {
+                .lslv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .lslv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+                .lsrv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .lsrv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+                .asrv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .asrv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+                .rorv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .rorv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+            }
+        }
+        unreachable; // Invalid opcode
+    }
+
+    /// Logical shifted register (AND, ORR, EOR, etc with shifts)
+    pub fn logicalShiftedRegister(
+        comptime op: anytype,
+        sf: Register.GeneralSize,
+        shift: DataProcessingRegister.Shift.Op,
+        imm6: u6,
+        rm: u5,
+        rn: u5,
+        rd: u5,
+        n: bool,
+    ) Instruction {
+        const op_name = @tagName(op);
+
+        if (std.mem.eql(u8, op_name, "and")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .bic = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .@"and" = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op_name, "orr")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .orn = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .orr = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op_name, "eor")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .eon = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .eor = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op_name, "ands")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .bics = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .ands = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        }
+        unreachable; // Invalid logical shifted register operation
+    }
+
+    /// Move wide immediate (MOVZ, MOVN, MOVK)
+    pub fn moveWideImmediate(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        hw: u2,
+        imm16: u16,
+        rd: u5,
+    ) Instruction {
+        const hw_enum: DataProcessingImmediate.MoveWideImmediate.Hw = @enumFromInt(hw);
+
+        if (std.mem.eql(u8, op, "movz")) {
+            return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+                .movz = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "movn")) {
+            return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+                .movn = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "movk")) {
+            return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+                .movk = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
+            } } };
+        }
+        unreachable; // Invalid moveWideImmediate operation
+    }
+
+    /// Load/store register immediate (LDR, STR, LDRB, STRB, LDRH, STRH with immediate offset)
+    pub fn loadStoreRegisterImmediate(
+        comptime op: []const u8,
+        sz: u2,
+        rt: u5,
+        rn: u5,
+        offset: i12,
+    ) Instruction {
+        const imm12: u12 = @bitCast(offset);
+        const sf: Register.GeneralSize = if (sz == 0) .word else .doubleword;
+
+        if (std.mem.eql(u8, op, "ldr")) {
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .ldr = .{ .sf = sf, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
+            } } };
+        } else if (std.mem.eql(u8, op, "str")) {
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .str = .{ .sf = sf, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
+            } } };
+        } else if (std.mem.eql(u8, op, "ldrb")) {
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .ldrb = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
+            } } };
+        } else if (std.mem.eql(u8, op, "strb")) {
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .strb = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
+            } } };
+        } else if (std.mem.eql(u8, op, "ldrh")) {
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .ldrh = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
+            } } };
+        } else if (std.mem.eql(u8, op, "strh")) {
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .strh = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
+            } } };
+        }
+        unreachable; // Invalid load/store register immediate op
+    }
+
     pub fn format(inst: Instruction, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const dis: aarch64.Disassemble = .{};
         try dis.printInstruction(inst, writer);
@@ -16559,13 +16960,13 @@ pub const Instruction = packed union {
         switch (@typeInfo(Type)) {
             .@"union" => |info| {
                 if (info.layout != .@"packed" or @bitSizeOf(Type) != @bitSizeOf(Backing)) {
-                    @compileLog(name ++ " should have u32 abi");
+                    // Type should have u32 abi
                 }
                 for (info.fields) |field| verify(name ++ "." ++ field.name, field.type);
             },
             .@"struct" => |info| {
                 if (info.layout != .@"packed" or info.backing_integer != Backing) {
-                    @compileLog(name ++ " should have u32 abi");
+                    // Type should have u32 abi
                 }
                 var bit_offset = 0;
                 for (info.fields) |field| {
