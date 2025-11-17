@@ -815,3 +815,108 @@ fn encodeFdiv(inst: Mir.Inst) Error!Instruction {
         data.rd.id(),
     );
 }
+
+const std = @import("std");
+const expect = std.testing.expect;
+
+test "encode ADD instruction" {
+    // Test encoding ADD X0, X1, X2 (rrr variant)
+    const inst = Mir.Inst{
+        .tag = .add,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = Register.x0,
+            .rn = Register.x1,
+            .rm = Register.x2,
+        } },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.addSubtractShiftedRegister(.add, Register.x0, Register.x1, Register.x2, .lsl, 0);
+    try expect(encoded.toU32() == expected.toU32());
+}
+
+test "encode MOV instruction" {
+    // Test encoding MOV X0, X1 (register to register)
+    const inst = Mir.Inst{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = Register.x0,
+            .rn = Register.x1,
+        } },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.logicalShiftedRegister(.orr, Register.x0, Register.xzr, Register.x1, .lsl, 0);
+    try expect(encoded.toU32() == expected.toU32());
+}
+
+test "encode LDR instruction" {
+    // Test encoding LDR X0, [X1]
+    const inst = Mir.Inst{
+        .tag = .ldr,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rt = Register.x0,
+            .rn = Register.x1,
+            .offset = .{ .immediate = 0 },
+        } },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.loadStoreRegisterImmediate(.ldr, Register.x0, Register.x1, Instruction.LoadStoreOffset.imm(0));
+    try expect(encoded.toU32() == expected.toU32());
+}
+
+test "encode STR instruction" {
+    // Test encoding STR X0, [X1]
+    const inst = Mir.Inst{
+        .tag = .str,
+        .ops = .mr,
+        .data = .{ .mr = .{
+            .rt = Register.x0,
+            .rn = Register.x1,
+            .offset = .{ .immediate = 0 },
+        } },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.loadStoreRegisterImmediate(.str, Register.x0, Register.x1, Instruction.LoadStoreOffset.imm(0));
+    try expect(encoded.toU32() == expected.toU32());
+}
+
+test "encode B instruction" {
+    // Test encoding B (unconditional branch)
+    const inst = Mir.Inst{
+        .tag = .b,
+        .ops = .none,
+        .data = .{ .inst = @enumFromInt(0) },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.unconditionalBranchImmediate(true, 0);
+    try expect(encoded.toU32() == expected.toU32());
+}
+
+test "encode RET instruction" {
+    // Test encoding RET (return from subroutine)
+    const inst = Mir.Inst{
+        .tag = .ret,
+        .ops = .none,
+        .data = .{ .reg = Register.x30 },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.unconditionalBranchRegister(.ret, Register.x30);
+    try expect(encoded.toU32() == expected.toU32());
+}
+
+test "encode CMP instruction" {
+    // Test encoding CMP X0, X1 (compare registers)
+    const inst = Mir.Inst{
+        .tag = .cmp,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = Register.xzr,
+            .rn = Register.x0,
+        } },
+    };
+    const encoded = try encode(inst);
+    const expected = Instruction.addSubtractShiftedRegister(.subs, Register.xzr, Register.x0, Register.xzr, .lsl, 0);
+    try expect(encoded.toU32() == expected.toU32());
+}

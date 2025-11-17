@@ -93,29 +93,23 @@ The ARM64 backend has been significantly enhanced with modern architecture simil
 2. **Optimization**: Register allocation could be improved
 3. **Inline Assembly**: Assembly instruction not implemented
 
-## Commit History Issues
+## Commit History - CLEANED UP
 
-The current commit history has 60+ commits with many small fixes that should be combined:
+Successfully cleaned up 62 commits into 7 logical commits:
 
-**Issues to Fix**:
-- Multiple "fix compilation errors" commits should be combined with implementation
-- "Update implementation plan" commits should be combined with features
-- "Document bug fixes" commits should be squashed
-- Generated files (compiler_rt.c, logs) should not be committed
+1. **ef6ccf11** - Add ARM64 backend modernization documentation
+2. **2523b1cd** - Implement ARM64 backend foundation (bits.zig, Mir_v2.zig, abi.zig)
+3. **38e3bdd9** - Implement ARM64 instruction encoding (encoder.zig, encoding.zig fixes)
+4. **6c153d3a** - Implement MIR lowering and machine code emission (Lower.zig, Emit.zig)
+5. **42adc1ae** - Implement ARM64 code generation with comprehensive AIR support (CodeGen_v2.zig)
+6. **51fcb73d** - Integrate ARM64 backend into compilation pipeline (aarch64.zig, codegen.zig)
+7. **1ad03f47** - Add bootstrap build artifacts to gitignore
 
-**Target Structure** (after cleanup):
-1. Add ARM64 backend foundation
-2. Implement code generation infrastructure
-3. Add calling convention and prologue/epilogue
-4. Implement arithmetic and bitwise operations
-5. Implement memory operations and stack allocation
-6. Implement function calls
-7. Implement floating point support
-8. Implement struct, array, and pointer operations
-9. Implement optional and error union operations
-10. Implement control flow and branches
-11. Implement utility instructions
-12. Integrate backend into compilation pipeline
+Removed from git:
+- compiler_rt.c (43,289 lines - generated file)
+- bootstrap.log (build output)
+- final_build.log (build output)
+- test_arm64.zig (minimal test - will be replaced with proper tests)
 
 ## Next Steps
 
