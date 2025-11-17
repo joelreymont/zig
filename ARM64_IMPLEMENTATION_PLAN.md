@@ -3,8 +3,8 @@
 ## Session Context
 **Branch**: `claude/add-arm64-backend-01XHckFVprmYheD9cdrr87Ke`
 **Last Updated**: 2025-11-17
-**Status**: ✅ Phase 1 COMPLETE + Phase 2 70% Complete
-**Commits**: 37 total
+**Status**: ✅ Phase 1 COMPLETE + Phase 2 75% Complete
+**Commits**: 40 total
 
 ## What We've Accomplished
 
@@ -20,8 +20,9 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 - ✅ Fixed Memory struct initialization
 - ✅ Removed invalid AIR tags
 
-**Currently Implemented AIR Instructions** (79+):
-- Arithmetic: add, sub, mul, div, rem, mod, neg, min, max, abs
+**Currently Implemented AIR Instructions** (86+):
+- Arithmetic: add, sub, mul, div, rem, mod, neg, min, max, abs, mul_add
+- Overflow arithmetic: add_with_overflow, sub_with_overflow, mul_with_overflow (TODO), shl_with_overflow (TODO)
 - Bitwise: and, or, xor, not, clz, ctz, popcount (TODO), byte_swap, bit_reverse
 - Shifts: shl, shr
 - Memory: load, store, memset (TODO), memcpy (TODO)
@@ -37,7 +38,7 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 - Stack: alloc
 - Optionals: is_null, is_non_null, is_null_ptr, is_non_null_ptr, optional_payload, optional_payload_ptr, wrap_optional (partial)
 - Error unions: is_err, is_non_err, is_err_ptr, is_non_err_ptr, unwrap_errunion_payload, unwrap_errunion_err, unwrap_errunion_payload_ptr, unwrap_errunion_err_ptr, wrap_errunion_payload (TODO)
-- Atomics: atomic_load, atomic_store_unordered, atomic_store_monotonic, atomic_store_release, atomic_store_seq_cst, atomic_rmw (TODO)
+- Atomics: atomic_load, atomic_store_unordered, atomic_store_monotonic, atomic_store_release, atomic_store_seq_cst, atomic_rmw (TODO), cmpxchg_weak (TODO), cmpxchg_strong (TODO)
 - Vector: splat
 
 ---
@@ -361,8 +362,8 @@ None - compilation is clean!
 - **Overall functionality**: ~40% complete
 
 ### Session Statistics
-- **Total commits**: 37
-- **Lines changed**: ~13,000+
+- **Total commits**: 40
+- **Lines changed**: ~13,500+
 - **Files modified**: 7
 - **Compilation errors fixed**: 58+
 - **New features implemented** (cumulative):
@@ -370,14 +371,16 @@ None - compilation is clean!
   - ✅ Phase 2.1: Struct and array access (6 AIR instructions)
   - ✅ Phase 2.3: Optionals and error unions (11 AIR instructions)
   - ✅ Session continuation #1: Slice pointers, error union pointers, trap (7 AIR instructions)
-  - ✅ Session continuation #2: Utility operations and atomics (12 AIR instructions)
-  - Total new AIR instructions: 49+
-  - Total new functions: 39+
+  - ✅ Session continuation #2: Utility operations and atomics (19 AIR instructions)
+  - Total new AIR instructions: 56+
+  - Total new functions: 45+
 - **Code quality**: All implementations with proper register allocation and type checking
 - **Recent additions** (current session):
   - Utility operations: byte_swap (REV), bit_reverse (RBIT), abs (CNEG/FABS), splat (DUP)
   - Memory operations: memset, memcpy (stubs with TODOs)
-  - Atomic operations: atomic_load, atomic_store (all orderings), atomic_rmw (stub)
+  - Atomic operations: atomic_load, atomic_store (all orderings), atomic_rmw, cmpxchg_weak/strong (stubs)
+  - Overflow arithmetic: add_with_overflow, sub_with_overflow (ADDS/SUBS + CSET), mul/shl_with_overflow (stubs)
+  - Multiply-add: mul_add (MADD/FMADD for int/float)
   - Uses DMB barriers for atomic ordering (MIR lacks LDAR/STLR instructions)
 
 ---
