@@ -57,7 +57,7 @@ pub const Relocation = struct {
 };
 
 /// Lower all MIR instructions to machine code
-pub fn lowerMir(self: *Lower) !void {
+pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow }!void {
     const gpa = self.allocator;
 
     // First pass: count instructions and build branch target map

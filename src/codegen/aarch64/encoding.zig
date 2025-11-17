@@ -16578,8 +16578,9 @@ pub const Instruction = packed union {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
                 .ret = .{ .Rn = @enumFromInt(rn) },
             } } };
+        } else {
+            @compileError("Invalid unconditional branch register op: " ++ op);
         }
-        @compileError("Invalid unconditional branch register op: " ++ op);
     }
 
     /// Create conditional branch immediate instruction (B.cond)
@@ -16746,8 +16747,9 @@ pub const Instruction = packed union {
                     .sub = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             }
+        } else {
+            @compileError("Invalid add/subtract immediate op: " ++ op);
         }
-        @compileError("Invalid add/subtract immediate op: " ++ op);
     }
 
     /// Data processing three source (MADD, MSUB, etc)
