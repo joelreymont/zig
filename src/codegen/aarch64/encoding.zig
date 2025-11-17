@@ -16578,9 +16578,8 @@ pub const Instruction = packed union {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
                 .ret = .{ .Rn = @enumFromInt(rn) },
             } } };
-        } else {
-            @compileError("Invalid unconditional branch register op: " ++ op);
         }
+        unreachable; // Invalid unconditional branch register op
     }
 
     /// Create conditional branch immediate instruction (B.cond)
@@ -16747,9 +16746,8 @@ pub const Instruction = packed union {
                     .sub = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             }
-        } else {
-            @compileError("Invalid add/subtract immediate op: " ++ op);
         }
+        unreachable; // Invalid add/subtract immediate op
     }
 
     /// Data processing three source (MADD, MSUB, etc)
@@ -16854,9 +16852,8 @@ pub const Instruction = packed union {
                     .ands = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
                 } } };
             }
-        } else {
-            @compileError("Invalid logical shifted register operation: " ++ op_name);
         }
+        unreachable; // Invalid logical shifted register operation
     }
 
     /// Move wide immediate (MOVZ, MOVN, MOVK)
@@ -16881,9 +16878,8 @@ pub const Instruction = packed union {
             return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
                 .movk = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
             } } };
-        } else {
-            @compileError("Invalid moveWideImmediate operation: " ++ op);
         }
+        unreachable; // Invalid moveWideImmediate operation
     }
 
     /// Load/store register immediate (LDR, STR, LDRB, STRB, LDRH, STRH with immediate offset)
@@ -16921,9 +16917,8 @@ pub const Instruction = packed union {
             return .{ .load_store = .{ .register_unsigned_immediate = .{
                 .integer = .{ .strh = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
-        } else {
-            @compileError("Invalid load/store register immediate op: " ++ op);
         }
+        unreachable; // Invalid load/store register immediate op
     }
 
     pub fn format(inst: Instruction, writer: *std.Io.Writer) std.Io.Writer.Error!void {

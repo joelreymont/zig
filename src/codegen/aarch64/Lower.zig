@@ -104,7 +104,7 @@ fn isPseudoInstruction(tag: Mir.Inst.Tag) bool {
     };
 }
 
-fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) !void {
+fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail, OutOfMemory, Overflow }!void {
     const gpa = self.allocator;
 
     // Skip pseudo instructions

@@ -605,8 +605,8 @@ fn genPrologue(self: *CodeGen) !void {
         .ops = .rrm,
         .data = .{ .rrm = .{
             .mem = .{
-                .base = .{ .reg = .sp },
-                .mod = .{ .pre_index = -16 },
+                .base = .sp,
+                .offset = .{ .pre_index = -16 },
             },
             .r1 = .x29,
             .r2 = .x30,

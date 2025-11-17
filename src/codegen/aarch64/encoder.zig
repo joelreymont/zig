@@ -406,7 +406,6 @@ fn encodeMov(inst: Mir.Inst) Error!Instruction {
         .lsl,
         0,
         data.rn.id(),
-        0,
         31, // XZR/WZR
         data.rd.id(),
         false,
