@@ -121,6 +121,12 @@ frame_locs: std.MultiArrayList(Mir.FrameLoc) = .empty,
 /// Stack offset for spills (grows downward from frame pointer)
 stack_offset: u32 = 0,
 
+/// Total stack space needed (calculated during codegen, applied in prologue)
+max_stack_size: u32 = 0,
+
+/// Index in MIR where stack allocation should be inserted (after FP setup)
+stack_alloc_inst_index: ?Mir.Inst.Index = null,
+
 // ============================================================================
 // Machine Code Value - where a value lives
 // ============================================================================
@@ -585,6 +591,23 @@ fn genImpl(self: *CodeGen) error{ CodegenFail, OutOfMemory, OutOfRegisters, Over
     if (last_inst_idx == 0 or self.mir_instructions.items(.tag)[last_inst_idx] != .ret) {
         try self.genEpilogue();
     }
+
+    // Insert stack allocation in prologue now that we know max_stack_size
+    if (self.max_stack_size > 0 and self.stack_alloc_inst_index != null) {
+        const stack_size_aligned = std.mem.alignForward(u32, self.max_stack_size, 16);
+        const insert_idx: usize = self.stack_alloc_inst_index.?;
+
+        // Insert SUB SP, SP, #stack_size at the saved index
+        try self.mir_instructions.insert(self.gpa, insert_idx, .{
+            .tag = .sub,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = .sp,
+                .rn = .sp,
+                .imm = stack_size_aligned,
+            } },
+        });
+    }
 }
 
 /// Generate function prologue
@@ -631,10 +654,9 @@ fn genPrologue(self: *CodeGen) !void {
         } },
     });
 
-    // Reserve placeholder for stack space allocation
-    // This will be patched after we know total stack_offset
-    // SUB SP, SP, #stack_size (filled in epilogue)
-    // For now, stack space for spills grows from frame pointer
+    // Remember where to insert stack allocation
+    // We'll insert "SUB SP, SP, #stack_size" here after codegen completes
+    self.stack_alloc_inst_index = @intCast(self.mir_instructions.len);
 }
 
 /// Generate function epilogue
@@ -662,11 +684,18 @@ fn genEpilogue(self: *CodeGen) !void {
         return;
     }
 
-    // TODO: Deallocate stack space if needed
-    // ADD SP, SP, #size
-
-    // Restore SP from FP (if we modified SP)
-    // For now, skip this since we didn't allocate extra stack
+    // Restore SP from FP if we allocated stack space
+    // MOV SP, FP  (restores SP to where it was after saving FP/LR)
+    if (self.max_stack_size > 0) {
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = .sp,
+                .rn = .x29, // FP
+            } },
+        });
+    }
 
     // Restore FP (X29) and LR (X30) from stack, post-increment SP
     // LDP X29, X30, [SP], #16
@@ -3627,33 +3656,47 @@ fn airAlloc(self: *CodeGen, inst: Air.Inst.Index) !void {
     }
 
     const zcu = self.pt.zcu;
-    const size = pointee_ty.abiSize(zcu);
+    const size: u32 = @intCast(pointee_ty.abiSize(zcu));
     const alignment = ptr_ty.ptrAlignment(zcu);
+    const alignment_bytes: u32 = @intCast(alignment.toByteUnits().?);
 
-    // TODO: Track stack allocations properly and adjust SP in prologue
-    // For now, we'll use a simplified approach
+    // Align stack_offset to required alignment
+    self.stack_offset = std.mem.alignForward(u32, self.stack_offset, alignment_bytes);
 
-    // Allocate a register to hold the stack address
+    // Allocate space on stack
+    const offset = self.stack_offset;
+    self.stack_offset += size;
+
+    // Track maximum stack size
+    self.max_stack_size = @max(self.max_stack_size, self.stack_offset);
+
+    // Allocate a register to hold the address
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
-    // Simple approach: just use SP as the pointer
-    // TODO: Properly track stack frame layout and offsets
-    // TODO: Adjust SP in prologue based on total stack usage
-
-    // MOV Xd, SP
-    try self.addInst(.{
-        .tag = .mov,
-        .ops = .rr,
-        .data = .{ .rr = .{
-            .rd = dst_reg,
-            .rn = .sp,
-        } },
-    });
-
-    // TODO: Subtract space from SP for the allocation
-    // For now, we'll pretend the space is already allocated
-    _ = size;
-    _ = alignment;
+    // Calculate address: FP - offset
+    // Since stack grows downward, allocations are at negative offsets from FP
+    if (offset == 0) {
+        // First allocation - just use FP
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = .x29, // FP
+            } },
+        });
+    } else {
+        // SUB Xd, FP, #offset
+        try self.addInst(.{
+            .tag = .sub,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = dst_reg,
+                .rn = .x29, // FP
+                .imm = offset,
+            } },
+        });
+    }
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
