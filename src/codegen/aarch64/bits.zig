@@ -304,6 +304,13 @@ pub const Register = enum(u8) {
         return reg.class() == .vector;
     }
 
+    /// Get a register at a given offset from this register
+    /// Used for argument passing: x0.offset(1) = x1, etc.
+    pub fn offset(reg: Register, off: u5) Register {
+        const base = @intFromEnum(reg);
+        return @enumFromInt(base + off);
+    }
+
     /// Frame pointer (X29)
     pub const fp: Register = .x29;
     /// Link register (X30)

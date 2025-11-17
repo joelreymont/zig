@@ -728,6 +728,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .ret => self.airRet(inst),
         .ret_load => self.airRetLoad(inst),
 
+        // Function calls
+        .call, .call_always_tail, .call_never_tail, .call_never_inline => self.airCall(inst),
+
         // Type conversions
         .intcast => self.airIntCast(inst),
         .trunc => self.airTrunc(inst),
@@ -1123,6 +1126,90 @@ fn airRetLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     // Generate epilogue and return
     try self.genEpilogue();
+}
+
+fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const pl_op = self.air.instructions.items(.data)[@intFromEnum(inst)].pl_op;
+    const extra = self.air.extraData(Air.Call, pl_op.payload);
+    const args: []const Air.Inst.Ref = @ptrCast(self.air.extra.items[extra.end..][0..extra.data.args_len]);
+
+    const callee = pl_op.operand;
+
+    // ARM64 calling convention: first 8 integer args in X0-X7
+    // TODO: Handle more than 8 args (stack), float args (D0-D7), and return values
+
+    // Marshal arguments to argument registers
+    for (args, 0..) |arg, i| {
+        if (i >= 8) {
+            // TODO: Stack arguments
+            return self.fail("TODO: ARM64 function calls with >8 arguments not yet supported", .{});
+        }
+
+        const arg_mcv = try self.resolveInst(arg.toIndex().?);
+        const arg_reg = Register.x0.offset(@intCast(i)); // X0, X1, X2, ..., X7
+
+        // Move argument to the appropriate register
+        switch (arg_mcv) {
+            .register => |reg| {
+                if (reg.id() != arg_reg.id()) {
+                    try self.addInst(.{
+                        .tag = .mov,
+                        .ops = .rr,
+                        .data = .{ .rr = .{
+                            .rd = arg_reg,
+                            .rn = reg,
+                        } },
+                    });
+                }
+            },
+            .immediate => |imm| {
+                // Load immediate to argument register
+                try self.addInst(.{
+                    .tag = .movz,
+                    .ops = .ri,
+                    .data = .{ .ri = .{
+                        .rd = arg_reg,
+                        .imm = @intCast(imm & 0xFFFF),
+                    } },
+                });
+                // TODO: Handle larger immediates with MOVK
+            },
+            else => return self.fail("TODO: ARM64 airCall with arg type {}", .{arg_mcv}),
+        }
+    }
+
+    // Generate call instruction
+    switch (try self.resolveInst(callee.toIndex().?)) {
+        .register => |reg| {
+            // BLR - Branch with link to register
+            try self.addInst(.{
+                .tag = .blr,
+                .ops = .r,
+                .data = .{ .r = .{ .rn = reg } },
+            });
+        },
+        .memory => {
+            // TODO: Load function pointer and call via BLR
+            return self.fail("TODO: ARM64 indirect calls via memory", .{});
+        },
+        else => {
+            // Direct call - assume it's a symbol
+            // BL - Branch with link (direct call)
+            // TODO: For now, we'll use BLR with the callee in a register
+            // This needs proper symbol resolution
+            return self.fail("TODO: ARM64 direct function calls need symbol resolution", .{});
+        },
+    }
+
+    // Track return value in X0
+    const result_ty = self.typeOfIndex(inst);
+    if (!result_ty.hasRuntimeBitsIgnoreComptime(self.pt.zcu)) {
+        // Void return - no value to track
+        return;
+    }
+
+    // Store return value from X0
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = .x0 }));
 }
 
 fn airConstant(self: *CodeGen, inst: Air.Inst.Index) !void {
