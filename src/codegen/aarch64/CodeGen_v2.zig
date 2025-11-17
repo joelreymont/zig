@@ -555,7 +555,14 @@ fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{ OutOf
 // MIR Generation
 // ============================================================================
 
-fn gen(self: *CodeGen) error{ CodegenFail, OutOfMemory, OutOfRegisters, Overflow, RelocationNotByteAligned }!void {
+fn gen(self: *CodeGen) error{ CodegenFail, OutOfMemory, Overflow, RelocationNotByteAligned }!void {
+    self.genImpl() catch |err| switch (err) {
+        error.OutOfRegisters => return error.CodegenFail,
+        else => |e| return e,
+    };
+}
+
+fn genImpl(self: *CodeGen) error{ CodegenFail, OutOfMemory, OutOfRegisters, Overflow, RelocationNotByteAligned }!void {
     _ = self.gpa;
     const air_tags = self.air.instructions.items(.tag);
 
@@ -1334,7 +1341,7 @@ fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
                     .ops = .rr,
                     .data = .{ .rr = .{
                         .rd = dst_reg.to32(), // Writing to W reg zeros upper 32 bits
-                        .rm = operand.register.to32(),
+                        .rn = operand.register.to32(),
                     } },
                 });
             } else {

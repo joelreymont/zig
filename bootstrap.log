@@ -2,79 +2,20 @@ cc -o zig-wasm2c stage1/wasm2c.c -O2 -std=c99
 ./zig-wasm2c stage1/zig1.wasm zig1.c
 cc -o zig1 zig1.c stage1/wasi.c -std=c99 -Os -lm
 ./zig1 lib build-exe -ofmt=c -lc -OReleaseSmall --name zig2 -femit-bin=zig2.c -target x86_64-linux --dep build_options --dep aro -Mroot=src/main.zig -Mbuild_options=config.zig -Maro=lib/compiler/aro/aro.zig
-src/codegen/aarch64/CodeGen_v2.zig:671:26: error: type 'codegen.aarch64.bits.Register' does not support struct initialization syntax
-                .base = .{ .reg = .sp },
-                        ~^~~~~~~~~~~~~~
-src/codegen/aarch64/bits.zig:117:22: note: enum declared here
-pub const Register = enum(u8) {
-                     ^~~~
+src/codegen/aarch64/CodeGen_v2.zig:295:5: error: expected type 'error{CodegenFail,OutOfMemory,Overflow,RelocationNotByteAligned}', found 'error{CodegenFail,OutOfMemory,OutOfRegisters,Overflow,RelocationNotByteAligned}'
+    try function.gen();
+    ^~~~~~~~~~~~~~~~~~
+src/codegen/aarch64/CodeGen_v2.zig:295:5: note: 'error.OutOfRegisters' not a member of destination error set
 referenced by:
-    airRet: src/codegen/aarch64/CodeGen_v2.zig:1109:25
-    genInst: src/codegen/aarch64/CodeGen_v2.zig:721:28
-    21 reference(s) hidden; use '-freference-trace=23' to see all references
-src/codegen/aarch64/CodeGen_v2.zig:740:23: error: type 'void' does not support array initialization syntax
-        .dbg_stmt => .{},
-                     ~^~
-src/codegen/aarch64/CodeGen_v2.zig:1050:44: error: expected type 'Air.Inst.Index', found 'Air.Inst.Ref'
-    const cond = try self.resolveInst(pl_op.operand);
-                                      ~~~~~^~~~~~~~
-src/Air.zig:1012:21: note: enum declared here
-    pub const Ref = enum(u32) {
-                    ^~~~
-src/Air.zig:974:23: note: enum declared here
-    pub const Index = enum(u32) {
-                      ^~~~
-src/codegen/aarch64/CodeGen_v2.zig:1462:46: note: parameter type declared here
-fn resolveInst(self: *CodeGen, inst: Air.Inst.Index) !MCValue {
-                                     ~~~~~~~~^~~~~~
-src/codegen/aarch64/CodeGen_v2.zig:1192:38: error: expected type 'Air.Inst.Index', found 'Air.Inst.Ref'
-    const lhs_ty = self.typeOf(bin_op.lhs);
-                               ~~~~~~^~~~
-src/Air.zig:1012:21: note: enum declared here
-    pub const Ref = enum(u32) {
-                    ^~~~
-src/Air.zig:974:23: note: enum declared here
-    pub const Index = enum(u32) {
-                      ^~~~
-src/codegen/aarch64/CodeGen_v2.zig:1475:41: note: parameter type declared here
-fn typeOf(self: *CodeGen, inst: Air.Inst.Index) Type {
-                                ~~~~~~~~^~~~~~
-src/codegen/aarch64/CodeGen_v2.zig:1249:14: error: no field named 'rm' in struct 'codegen.aarch64.Mir_v2.Inst.Data__struct_12774'
-            .rm = operand.register,
-             ^~
+    generate: src/codegen/aarch64.zig:42:39
+    generateFunction: src/codegen.zig:163:45
+    17 reference(s) hidden; use '-freference-trace=19' to see all references
+src/codegen/aarch64/CodeGen_v2.zig:1337:26: error: no field named 'rm' in struct 'codegen.aarch64.Mir_v2.Inst.Data__struct_12774'
+                        .rm = operand.register.to32(),
+                         ^~
 src/codegen/aarch64/Mir_v2.zig:485:13: note: struct declared here
         rr: struct {
             ^~~~~~
-src/codegen/aarch64/CodeGen_v2.zig:1268:14: error: no field named 'rm' in struct 'codegen.aarch64.Mir_v2.Inst.Data__struct_12774'
-            .rm = operand.register,
-             ^~
-src/codegen/aarch64/Mir_v2.zig:485:13: note: struct declared here
-        rr: struct {
-            ^~~~~~
-src/codegen/aarch64/CodeGen_v2.zig:1279:37: error: expected type 'Air.Inst.Index', found 'Air.Inst.Ref'
-    const src_ty = self.typeOf(ty_op.operand);
-                               ~~~~~^~~~~~~~
-src/Air.zig:1012:21: note: enum declared here
-    pub const Ref = enum(u32) {
-                    ^~~~
-src/Air.zig:974:23: note: enum declared here
-    pub const Index = enum(u32) {
-                      ^~~~
-src/codegen/aarch64/CodeGen_v2.zig:1475:41: note: parameter type declared here
-fn typeOf(self: *CodeGen, inst: Air.Inst.Index) Type {
-                                ~~~~~~~~^~~~~~
-src/codegen/aarch64/CodeGen_v2.zig:1373:14: error: no field named 'rm' in struct 'codegen.aarch64.Mir_v2.Inst.Data__struct_12774'
-            .rm = narrow_reg,
-             ^~
-src/codegen/aarch64/Mir_v2.zig:485:13: note: struct declared here
-        rr: struct {
-            ^~~~~~
-src/codegen/aarch64/CodeGen_v2.zig:1481:20: error: member function expected 2 argument(s), found 1
-    return self.air.typeOfIndex(inst);
-           ~~~~~~~~^~~~~~~~~~~~
-src/Air.zig:1520:5: note: function declared here
-pub fn typeOfIndex(air: *const Air, inst: Air.Inst.Index, ip: *const InternPool) Type {
-~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Compile Log Output:
 @as(*const [30:0]u8, "Invalid compare and branch op:"), @as([]const u8, "cbz"[0..3])
