@@ -479,15 +479,30 @@ The new ARM64 backend has been integrated into the Zig compiler:
 - Simple program with `main()` and `add()` functions
 - Tests calling convention, prologue/epilogue, arithmetic
 
+### Bug Fixes (2024-11-17)
+
+**Fixed MIR data structure field name mismatches:**
+
+1. ✅ Added missing `mrr` and `rrm` data variants to Mir_v2.zig
+2. ✅ Fixed `spillReg()` - STR instruction field names
+3. ✅ Fixed `reloadReg()` - LDR instruction field names
+4. ✅ Fixed `genPrologue()` - STP instruction operand pattern and fields
+5. ✅ Fixed `genEpilogue()` - LDP instruction operand pattern and fields
+6. ✅ Fixed `airCondBr()` - CBZ instruction field names
+
+All data structure field names now match their Mir_v2.zig definitions.
+These bugs would have been caught during compilation.
+
 ### Next Integration Steps
 
-1. **Compilation Test** - Build Zig with new backend, fix errors
-2. **MIR Conversion** - Either:
+1. ✅ ~~Compilation Test~~ - Fixed field name mismatches
+2. **Additional Testing** - Check for more compilation errors
+3. **MIR Conversion** - Either:
    - Implement Mir_v2 → Mir converter, OR
    - Update Assemble.zig to consume Mir_v2 directly
-3. **Functional Test** - Run test_arm64.zig
-4. **Zig Test Suite** - Run existing ARM64 tests
-5. **Hardware Test** - Test on actual ARM64 machine
+4. **Functional Test** - Run test_arm64.zig
+5. **Zig Test Suite** - Run existing ARM64 tests
+6. **Hardware Test** - Test on actual ARM64 machine
 
 ---
 
