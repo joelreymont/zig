@@ -16730,21 +16730,21 @@ pub const Instruction = packed union {
         if (std.mem.eql(u8, op, "add")) {
             if (set_flags) {
                 return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
-                    .adds = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                    .adds = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             } else {
                 return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
-                    .add = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                    .add = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             }
         } else if (std.mem.eql(u8, op, "sub")) {
             if (set_flags) {
                 return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
-                    .subs = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                    .subs = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             } else {
                 return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
-                    .sub = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                    .sub = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             }
         } else {
@@ -16858,32 +16858,32 @@ pub const Instruction = packed union {
         rn: u5,
         offset: i12,
     ) Instruction {
-        const size_enum: LoadStoreRegisterUnsigned.Size = @enumFromInt(sz);
         const imm12: u12 = @bitCast(offset);
+        const sf: Register.GeneralSize = if (sz == 0) .w else .x;
 
         if (std.mem.eql(u8, op, "ldr")) {
-            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
-                .ldr = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .ldr = .{ .sf = sf, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
         } else if (std.mem.eql(u8, op, "str")) {
-            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
-                .str = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .str = .{ .sf = sf, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
         } else if (std.mem.eql(u8, op, "ldrb")) {
-            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
-                .ldrb = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .ldrb = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
         } else if (std.mem.eql(u8, op, "strb")) {
-            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
-                .strb = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .strb = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
         } else if (std.mem.eql(u8, op, "ldrh")) {
-            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
-                .ldrh = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .ldrh = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
         } else if (std.mem.eql(u8, op, "strh")) {
-            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
-                .strh = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            return .{ .load_store = .{ .register_unsigned_immediate = .{
+                .integer = .{ .strh = .{ .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) } },
             } } };
         } else {
             @compileError("Invalid load/store register immediate op: " ++ op);
