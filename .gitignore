@@ -32,4 +32,5 @@ zig-cache/
 /current_build.log
 /bootstrap.log
 /final_build.log
+/build_stack_args.log
 /compiler_rt.c
