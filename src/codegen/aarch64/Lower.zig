@@ -76,7 +76,7 @@ pub fn lowerMir(self: *Lower) !void {
     }
 
     // Second pass: generate instructions
-    for (self.mir.instructions.items(.tag), 0..) |tag, i| {
+    for (self.mir.instructions.items(.tag), 0..) |_, i| {
         const mir_index: Mir.Inst.Index = @intCast(i);
         const inst = self.mir.instructions.get(mir_index);
 
@@ -104,7 +104,7 @@ fn isPseudoInstruction(tag: Mir.Inst.Tag) bool {
     };
 }
 
-fn lowerInst(self: *Lower, inst: Mir.Inst, index: Mir.Inst.Index) !void {
+fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) !void {
     const gpa = self.allocator;
 
     // Skip pseudo instructions

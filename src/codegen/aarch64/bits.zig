@@ -361,8 +361,9 @@ pub const Memory = struct {
     }
 };
 
-/// Register + offset (used for tracking values)
-pub const RegisterOffset = struct {
+/// Register + offset (used for tracking values in CodeGen)
+/// Note: Different from Memory.RegisterOffset which is for addressing modes
+pub const RegOffset = struct {
     reg: Register,
     off: i32,
 };
@@ -412,8 +413,8 @@ pub const Immediate = union(enum) {
 
     pub fn asUnsigned(imm: Immediate, bits: u16) u64 {
         return switch (imm) {
-            .signed => |val| @bitCast(@as(i64, val) & (@as(i64, 1) << @intCast(bits) - 1)),
-            .unsigned => |val| val & (@as(u64, 1) << @intCast(bits) - 1),
+            .signed => |val| @bitCast(@as(i64, val) & (@as(i64, 1) << @as(u6, @intCast(bits)) - 1)),
+            .unsigned => |val| val & (@as(u64, 1) << @as(u6, @intCast(bits)) - 1),
         };
     }
 };

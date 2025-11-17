@@ -565,12 +565,12 @@ fn encodeStrh(inst: Mir.Inst) Error!Instruction {
     };
 }
 
-fn encodeLdp(inst: Mir.Inst) Error!Instruction {
+fn encodeLdp(_: Mir.Inst) Error!Instruction {
     // Simplified - would need proper implementation
     return error.UnimplementedInstruction;
 }
 
-fn encodeStp(inst: Mir.Inst) Error!Instruction {
+fn encodeStp(_: Mir.Inst) Error!Instruction {
     // Simplified - would need proper implementation
     return error.UnimplementedInstruction;
 }
@@ -579,12 +579,12 @@ fn encodeStp(inst: Mir.Inst) Error!Instruction {
 // Branch Instructions
 // ============================================================================
 
-fn encodeB(inst: Mir.Inst) Error!Instruction {
+fn encodeB(_: Mir.Inst) Error!Instruction {
     // Offset will be filled in by Lower.zig
     return Instruction.unconditionalBranchImmediate(.b, 0);
 }
 
-fn encodeBl(inst: Mir.Inst) Error!Instruction {
+fn encodeBl(_: Mir.Inst) Error!Instruction {
     // Offset will be filled in by Lower.zig
     return Instruction.unconditionalBranchImmediate(.bl, 0);
 }
@@ -611,7 +611,7 @@ fn encodeBlr(inst: Mir.Inst) Error!Instruction {
     );
 }
 
-fn encodeRet(inst: Mir.Inst) Error!Instruction {
+fn encodeRet(_: Mir.Inst) Error!Instruction {
     // RET defaults to X30 (LR)
     return Instruction.unconditionalBranchRegister(
         .ret,

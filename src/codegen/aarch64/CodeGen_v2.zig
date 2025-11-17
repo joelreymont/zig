@@ -1485,13 +1485,6 @@ fn typeOfIndex(self: *CodeGen, inst: Air.Inst.Index) Type {
     return self.air.typeOfIndex(inst);
 }
 
-fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{CodegenFail} {
-    @setCold(true);
-    log.err(format, args);
-    _ = self;
-    return error.CodegenFail;
-}
-
 // ============================================================================
 // Register Spilling
 // ============================================================================

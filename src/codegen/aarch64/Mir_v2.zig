@@ -637,7 +637,26 @@ pub fn deinit(mir: *@This(), gpa: Allocator) void {
     mir.* = undefined;
 }
 
+/// Emit MIR to machine code
+/// This is the entry point called by codegen.zig
+pub fn emit(
+    mir: @This(),
+    lf: *link.File,
+    pt: Zcu.PerThread,
+    src_loc: Zcu.LazySrcLoc,
+    func_index: InternPool.Index,
+    atom_index: u32,
+    w: *std.Io.Writer,
+    debug_output: link.File.DebugInfoOutput,
+) !void {
+    const Emit = @import("Emit.zig");
+    return Emit.emitMir(mir, lf, pt, src_loc, func_index, atom_index, w, debug_output);
+}
+
 const Mir = @This();
+const link = @import("../../link.zig");
+const Zcu = @import("../../Zcu.zig");
+const InternPool = @import("../../InternPool.zig");
 
 test "Mir basic" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

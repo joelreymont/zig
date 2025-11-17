@@ -27,7 +27,6 @@ pub fn emitMir(
 ) !void {
     const zcu = pt.zcu;
     const gpa = zcu.gpa;
-    const ip = &zcu.intern_pool;
     const func = zcu.funcInfo(func_index);
     const mod = zcu.navFileScope(func.owner_nav).mod.?;
     const target = &mod.resolved_target.result;
@@ -68,8 +67,6 @@ pub fn emitMir(
             debug_output,
         );
     }
-
-    _ = bin_file;
 }
 
 /// Emit DWARF debug information
