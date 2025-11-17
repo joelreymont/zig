@@ -109,7 +109,7 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
 
 **Files Created:**
 
-7. **`CodeGen_v2.zig`** (now ~800 lines, enhanced)
+7. **`CodeGen_v2.zig`** (now ~870 lines, enhanced)
    - Main code generator: AIR → MIR translation
    - `generate()` entry point matching x86_64 signature
    - Liveness-based register allocation integration
@@ -132,6 +132,13 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
      - Stack overflow handling
      - Register width aliasing (W vs X registers)
      - Indirect return pointer (X8)
+   - **✅ Function Prologue/Epilogue**:
+     - `genPrologue()`: STP X29, X30 / MOV X29, SP
+     - `genEpilogue()`: LDP X29, X30 / RET
+     - Pre/post-index addressing for stack operations
+     - Frame pointer setup (X29)
+     - Link register preservation (X30)
+     - Naked function support (skip prologue/epilogue)
 
 **AIR Instruction Handlers Implemented:**
 
@@ -210,12 +217,12 @@ src/codegen/aarch64/
 - [x] Load/store AIR handlers
 - [x] Compare/branch AIR handlers
 - [x] Calling convention resolution (AAPCS64 parameter/return handling)
+- [x] Function prologue generation (save FP/LR, setup stack)
+- [x] Function epilogue generation (restore FP/LR, teardown stack)
 - [x] Documentation (this file + ARM64_MODERNIZATION_PLAN.md)
 
 ### In Progress 🚧
 
-- [ ] Function prologue generation (save FP/LR, setup stack)
-- [ ] Function epilogue generation (restore FP/LR, teardown stack)
 - [ ] Complete AIR handler coverage (~200+ remaining)
 - [ ] Register spilling to stack
 - [ ] Integration with existing aarch64.zig
@@ -381,7 +388,7 @@ src/codegen/aarch64/
 ### Critical 🔴
 
 - [x] ~~**Calling convention not implemented**~~ - ✅ DONE: AAPCS64 implemented
-- [ ] **Prologue/epilogue missing** - Functions don't save/restore registers (IN PROGRESS)
+- [x] ~~**Prologue/epilogue missing**~~ - ✅ DONE: FP/LR save/restore implemented
 - [ ] **No register spilling** - Will run out of registers on complex functions
 - [ ] **Branch targets not tracked** - airBr() uses placeholder
 
