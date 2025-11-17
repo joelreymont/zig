@@ -555,7 +555,7 @@ fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{ OutOf
 // MIR Generation
 // ============================================================================
 
-fn gen(self: *CodeGen) !void {
+fn gen(self: *CodeGen) error{ CodegenFail, OutOfMemory, OutOfRegisters }!void {
     _ = self.gpa;
     const air_tags = self.air.instructions.items(.tag);
 
@@ -1312,7 +1312,7 @@ fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
                     .ops = .rr,
                     .data = .{ .rr = .{
                         .rd = dst_reg.to64(),
-                        .rm = operand.register.to32(),
+                        .rn = operand.register.to32(),
                     } },
                 });
             } else {
