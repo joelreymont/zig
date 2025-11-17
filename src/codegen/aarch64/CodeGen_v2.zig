@@ -702,12 +702,17 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .rem => self.airRem(inst),
         .mod => self.airMod(inst),
         .neg => self.airNeg(inst),
+        .min => self.airMinMax(inst, true),
+        .max => self.airMinMax(inst, false),
 
         // Bitwise
         .bit_and => self.airAnd(inst),
         .bit_or => self.airOr(inst),
         .xor => self.airXor(inst),
         .not => self.airNot(inst),
+        .clz => self.airClz(inst),
+        .ctz => self.airCtz(inst),
+        .popcount => self.airPopcount(inst),
 
         // Shifts
         .shl, .shl_exact => self.airShl(inst),
@@ -719,6 +724,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
 
         // Compare
         .cmp_eq, .cmp_neq, .cmp_lt, .cmp_lte, .cmp_gt, .cmp_gte => self.airCmp(inst),
+
+        // Select (ternary)
+        .select => self.airSelect(inst),
 
         // Float operations
         .sqrt, .neg, .abs => self.airUnaryFloatOp(inst),
@@ -2351,6 +2359,201 @@ fn airNot(self: *CodeGen, inst: Air.Inst.Index) !void {
         .data = .{ .rr = .{
             .rd = dst_reg,
             .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airMinMax(self: *CodeGen, inst: Air.Inst.Index, comptime is_min: bool) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    // Check if this is a float operation
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
+
+    if (is_float) {
+        // Floating point min/max
+        const reg_class: abi.RegisterClass = .vector;
+        const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+        const tag: Mir.Inst.Tag = if (is_min) .fmin else .fmax;
+
+        try self.addInst(.{
+            .tag = tag,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    } else {
+        // Integer min/max using conditional select
+        // CMP lhs, rhs
+        // CSEL dst, lhs, rhs, <condition>
+
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = lhs.register,
+                .rn = rhs.register,
+            } },
+        });
+
+        const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+        // For min: select lhs if lhs < rhs (LT), else rhs
+        // For max: select lhs if lhs > rhs (GT), else rhs
+        const zcu = self.pt.zcu;
+        const is_signed = result_ty.isSignedInt(zcu);
+        const cond: Condition = if (is_min)
+            (if (is_signed) .lt else .lo) // less than (signed) or lower (unsigned)
+        else
+            (if (is_signed) .gt else .hi); // greater than (signed) or higher (unsigned)
+
+        try self.addInst(.{
+            .tag = .csel,
+            .ops = .rrrc,
+            .data = .{ .rrrc = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+                .cond = cond,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    }
+}
+
+fn airClz(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(un_op.operand.toIndex().?);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // CLZ Xd, Xn - Count leading zeros
+    try self.addInst(.{
+        .tag = .clz,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airCtz(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(un_op.operand.toIndex().?);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ARM64 doesn't have a CTZ instruction, but we can implement it as:
+    // RBIT (reverse bits), then CLZ
+
+    const temp_reg = try self.register_manager.allocReg(null, .gp);
+
+    // RBIT temp, operand - Reverse bit order
+    try self.addInst(.{
+        .tag = .rbit,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = temp_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    // CLZ dst, temp - Count leading zeros (which are trailing zeros in original)
+    try self.addInst(.{
+        .tag = .clz,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = temp_reg,
+        } },
+    });
+
+    self.register_manager.freeReg(temp_reg);
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airPopcount(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(un_op.operand.toIndex().?);
+
+    // ARM64 has NEON instruction CNT (count bits), but it works on vector registers
+    // For scalar, we need to:
+    // 1. Move to vector register
+    // 2. Use CNT (count bits in each byte)
+    // 3. Use ADDV to sum all bytes
+    // 4. Move back to general purpose register
+
+    const vec_reg = try self.register_manager.allocReg(null, .vector);
+
+    // FMOV Dd, Xn - Move from GP to vector
+    try self.addInst(.{
+        .tag = .fmov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = vec_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    // CNT Vd.8B, Vn.8B - Count bits in each byte
+    // Note: This is simplified; actual encoding needs vector arrangement
+    // For now, mark as TODO and use a simpler approach
+    return self.fail("TODO: popcount requires NEON vector operations not yet fully implemented", .{});
+}
+
+fn airSelect(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const pl_op = self.air.instructions.items(.data)[@intFromEnum(inst)].pl_op;
+    const extra = self.air.extraData(Air.Bin, pl_op.payload).data;
+
+    // Select has 3 operands: condition, true_value, false_value
+    // pl_op.operand is the condition (boolean)
+    // extra contains true and false values
+
+    const cond = try self.resolveInst(pl_op.operand.toIndex().?);
+    const true_val = try self.resolveInst(extra.lhs.toIndex().?);
+    const false_val = try self.resolveInst(extra.rhs.toIndex().?);
+
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // Compare condition with zero (false)
+    // CMP cond, #0
+    try self.addInst(.{
+        .tag = .cmp,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = cond.register,
+            .rn = .xzr, // Compare with zero
+        } },
+    });
+
+    // CSEL dst, true_val, false_val, NE
+    // Select true_val if condition != 0 (NE), else false_val
+    try self.addInst(.{
+        .tag = .csel,
+        .ops = .rrrc,
+        .data = .{ .rrrc = .{
+            .rd = dst_reg,
+            .rn = true_val.register,
+            .rm = false_val.register,
+            .cond = .ne, // not equal (condition is true/nonzero)
         } },
     });
 
