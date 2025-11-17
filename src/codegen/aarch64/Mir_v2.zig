@@ -649,7 +649,7 @@ pub fn emit(
     atom_index: u32,
     w: *std.Io.Writer,
     debug_output: link.File.DebugInfoOutput,
-) error{ CodegenFail, OutOfMemory, Overflow, RelocationNotByteAligned, WriteFailed }!void {
+) error{ CodegenFail, OutOfMemory, Overflow, RelocationNotByteAligned, WriteFailed, InvalidImmediate, InvalidOperands, InvalidRegister, PseudoInstruction, UnimplementedInstruction }!void {
     const Emit = @import("Emit.zig");
     return Emit.emitMir(mir, lf, pt, src_loc, func_index, atom_index, w, debug_output);
 }

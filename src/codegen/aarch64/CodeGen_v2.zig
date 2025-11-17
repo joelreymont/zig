@@ -620,7 +620,7 @@ fn genPrologue(self: *CodeGen) !void {
         .ops = .rr,
         .data = .{ .rr = .{
             .rd = .x29,
-            .rm = .sp,
+            .rn = .sp,
         } },
     });
 

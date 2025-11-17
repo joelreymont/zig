@@ -57,7 +57,7 @@ pub const Relocation = struct {
 };
 
 /// Lower all MIR instructions to machine code
-pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow }!void {
+pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow, InvalidImmediate, InvalidOperands, InvalidRegister, PseudoInstruction, UnimplementedInstruction }!void {
     const gpa = self.allocator;
 
     // First pass: count instructions and build branch target map
@@ -104,7 +104,7 @@ fn isPseudoInstruction(tag: Mir.Inst.Tag) bool {
     };
 }
 
-fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail, OutOfMemory, Overflow }!void {
+fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail, OutOfMemory, Overflow, InvalidImmediate, InvalidOperands, InvalidRegister, PseudoInstruction, UnimplementedInstruction }!void {
     const gpa = self.allocator;
 
     // Skip pseudo instructions
@@ -174,11 +174,11 @@ fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail
     try self.instructions.append(gpa, encoded);
 }
 
-fn applyRelocations(self: *Lower) !void {
+fn applyRelocations(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow }!void {
     for (self.relocations.items) |reloc| {
         const target_offset = self.branch_targets.get(reloc.target) orelse {
             std.debug.print("Branch target {} not found\n", .{reloc.target});
-            return error.InvalidBranchTarget;
+            return error.CodegenFail;
         };
 
         const source_offset = reloc.source;
@@ -190,7 +190,7 @@ fn applyRelocations(self: *Lower) !void {
             .branch_26 => {
                 // Unconditional branch: 26-bit signed offset
                 if (offset_instructions < -33554432 or offset_instructions > 33554431) {
-                    return error.BranchOutOfRange;
+                    return error.CodegenFail;
                 }
 
                 const offset_26: i26 = @intCast(offset_instructions);
@@ -206,7 +206,7 @@ fn applyRelocations(self: *Lower) !void {
             .branch_19 => {
                 // Conditional branch: 19-bit signed offset
                 if (offset_instructions < -262144 or offset_instructions > 262143) {
-                    return error.BranchOutOfRange;
+                    return error.CodegenFail;
                 }
 
                 const offset_19: i19 = @intCast(offset_instructions);
@@ -222,7 +222,7 @@ fn applyRelocations(self: *Lower) !void {
             .cbz_19 => {
                 // Compare and branch: 19-bit signed offset
                 if (offset_instructions < -262144 or offset_instructions > 262143) {
-                    return error.BranchOutOfRange;
+                    return error.CodegenFail;
                 }
 
                 const offset_19: i19 = @intCast(offset_instructions);
@@ -238,7 +238,7 @@ fn applyRelocations(self: *Lower) !void {
             .tbz_14 => {
                 // Test and branch: 14-bit signed offset
                 if (offset_instructions < -8192 or offset_instructions > 8191) {
-                    return error.BranchOutOfRange;
+                    return error.CodegenFail;
                 }
 
                 const offset_14: i14 = @intCast(offset_instructions);
