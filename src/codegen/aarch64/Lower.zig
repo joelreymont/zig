@@ -140,7 +140,7 @@ fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) !void {
             // Record relocation
             try self.relocations.append(gpa, .{
                 .source = source_offset,
-                .target = inst.data.rc.target.?,
+                .target = inst.data.rel.target,
                 .type = .branch_19,
             });
             return;

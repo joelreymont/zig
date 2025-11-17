@@ -147,7 +147,7 @@ pub const MCValue = union(enum) {
     /// Address of frame location
     frame_addr: bits.FrameAddr,
     /// Register + constant offset
-    register_offset: bits.RegisterOffset,
+    register_offset: bits.RegOffset,
 };
 
 pub const InstTracking = struct {
@@ -180,7 +180,7 @@ pub const InstTracking = struct {
         self.long = .{ .dead = scope_generation };
     }
 
-    fn isConditionFlags(self: InstTracking) bool {
+    fn isConditionFlags(_: InstTracking) bool {
         return false; // ARM64 uses condition code results differently
     }
 };
@@ -256,7 +256,7 @@ pub fn generate(
     _ = bin_file;
     const zcu = pt.zcu;
     const gpa = zcu.gpa;
-    const ip = &zcu.intern_pool;
+    _ = &zcu.intern_pool;
     const func = zcu.funcInfo(func_index);
     const fn_type: Type = .fromInterned(func.ty);
     const mod = zcu.navFileScope(func.owner_nav).mod.?;
@@ -556,7 +556,7 @@ fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{ OutOf
 // ============================================================================
 
 fn gen(self: *CodeGen) !void {
-    const gpa = self.gpa;
+    _ = self.gpa;
     const air_tags = self.air.instructions.items(.tag);
 
     // Generate function prologue

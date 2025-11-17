@@ -117,7 +117,7 @@ fn encodeAdd(inst: Mir.Inst) Error!Instruction {
             const data = inst.data.rrr;
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             break :blk Instruction.addSubtractShiftedRegister(
-                .add,
+                "add",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
@@ -132,7 +132,7 @@ fn encodeAdd(inst: Mir.Inst) Error!Instruction {
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             if (data.imm > 0xFFF) return error.InvalidImmediate;
             break :blk Instruction.addSubtractImmediate(
-                .add,
+                "add",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
@@ -151,7 +151,7 @@ fn encodeAdds(inst: Mir.Inst) Error!Instruction {
             const data = inst.data.rrr;
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             break :blk Instruction.addSubtractShiftedRegister(
-                .add,
+                "add",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
@@ -166,7 +166,7 @@ fn encodeAdds(inst: Mir.Inst) Error!Instruction {
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             if (data.imm > 0xFFF) return error.InvalidImmediate;
             break :blk Instruction.addSubtractImmediate(
-                .add,
+                "add",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
@@ -185,7 +185,7 @@ fn encodeSub(inst: Mir.Inst) Error!Instruction {
             const data = inst.data.rrr;
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             break :blk Instruction.addSubtractShiftedRegister(
-                .sub,
+                "sub",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
@@ -219,7 +219,7 @@ fn encodeSubs(inst: Mir.Inst) Error!Instruction {
             const data = inst.data.rrr;
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             break :blk Instruction.addSubtractShiftedRegister(
-                .sub,
+                "sub",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
@@ -254,10 +254,9 @@ fn encodeMul(inst: Mir.Inst) Error!Instruction {
         @enumFromInt(sf),
         0b000, // MADD/MSUB
         data.rm.id(),
-        0, // Ra = XZR (multiply, not multiply-add)
+        31, // Ra = XZR (multiply, not multiply-add)
         data.rn.id(),
         data.rd.id(),
-        31, // Ra = XZR
     );
 }
 
@@ -464,7 +463,7 @@ fn encodeLdr(inst: Mir.Inst) Error!Instruction {
             if (imm < 0 or imm > 0x7FF8) return error.InvalidImmediate;
             const imm12: u12 = @intCast(@divExact(imm, 8));
             break :blk Instruction.loadStoreRegisterImmediate(
-                .ldr,
+                "ldr",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.mem.base.id(),
@@ -484,7 +483,7 @@ fn encodeStr(inst: Mir.Inst) Error!Instruction {
             if (imm < 0 or imm > 0x7FF8) return error.InvalidImmediate;
             const imm12: u12 = @intCast(@divExact(imm, 8));
             break :blk Instruction.loadStoreRegisterImmediate(
-                .str,
+                "str",
                 @enumFromInt(sf),
                 data.rs.id(),
                 data.mem.base.id(),
@@ -501,7 +500,7 @@ fn encodeLdrb(inst: Mir.Inst) Error!Instruction {
         .immediate => |imm| blk: {
             if (imm < 0 or imm > 0xFFF) return error.InvalidImmediate;
             break :blk Instruction.loadStoreRegisterImmediate(
-                .ldrb,
+                "ldrb",
                 .w,
                 data.rd.id(),
                 data.mem.base.id(),
@@ -518,7 +517,7 @@ fn encodeStrb(inst: Mir.Inst) Error!Instruction {
         .immediate => |imm| blk: {
             if (imm < 0 or imm > 0xFFF) return error.InvalidImmediate;
             break :blk Instruction.loadStoreRegisterImmediate(
-                .strb,
+                "strb",
                 .w,
                 data.rs.id(),
                 data.mem.base.id(),
@@ -536,7 +535,7 @@ fn encodeLdrh(inst: Mir.Inst) Error!Instruction {
             if (imm < 0 or imm > 0x1FFE) return error.InvalidImmediate;
             const imm12: u12 = @intCast(@divExact(imm, 2));
             break :blk Instruction.loadStoreRegisterImmediate(
-                .ldrh,
+                "ldrh",
                 .w,
                 data.rd.id(),
                 data.mem.base.id(),
@@ -554,7 +553,7 @@ fn encodeStrh(inst: Mir.Inst) Error!Instruction {
             if (imm < 0 or imm > 0x1FFE) return error.InvalidImmediate;
             const imm12: u12 = @intCast(@divExact(imm, 2));
             break :blk Instruction.loadStoreRegisterImmediate(
-                .strh,
+                "strh",
                 .w,
                 data.rs.id(),
                 data.mem.base.id(),
@@ -592,7 +591,7 @@ fn encodeBl(_: Mir.Inst) Error!Instruction {
 fn encodeBr(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.r;
     return Instruction.unconditionalBranchRegister(
-        .br,
+        "br",
         0b11111,
         0b000000,
         data.id(),
@@ -603,7 +602,7 @@ fn encodeBr(inst: Mir.Inst) Error!Instruction {
 fn encodeBlr(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.r;
     return Instruction.unconditionalBranchRegister(
-        .blr,
+        "blr",
         0b11111,
         0b000000,
         data.id(),
@@ -614,7 +613,7 @@ fn encodeBlr(inst: Mir.Inst) Error!Instruction {
 fn encodeRet(_: Mir.Inst) Error!Instruction {
     // RET defaults to X30 (LR)
     return Instruction.unconditionalBranchRegister(
-        .ret,
+        "ret",
         0b11111,
         0b000000,
         30, // X30/LR
@@ -673,10 +672,7 @@ fn encodeCmp(inst: Mir.Inst) Error!Instruction {
                 true, // Set flags
             );
         },
-        .ri => blk: {
-            const data = inst.data.ri;
-            const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
-            if (data.imm > 0xFFF) return error.InvalidImmediate;
+        .ri => {
             // TODO: addSubtractImmediate not yet implemented
             return error.UnimplementedInstruction;
         },

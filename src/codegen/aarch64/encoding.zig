@@ -16566,7 +16566,8 @@ pub const Instruction = packed union {
         rn: u5,
         rm: u5,
     ) Instruction {
-        const br = BranchExceptionGeneratingSystem.UnconditionalBranchRegister;
+        const UnconditionalBR = BranchExceptionGeneratingSystem.UnconditionalBranchRegister;
+        _ = UnconditionalBR;
         if (std.mem.eql(u8, op, "br")) {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
                 .br = .{ .A = a, .M = m, .Rn = rn, .Rm = rm },
@@ -16600,14 +16601,15 @@ pub const Instruction = packed union {
     ) Instruction {
         if (std.mem.eql(u8, op, "cbz")) {
             return .{ .branch_exception_generating_system = .{ .compare_branch_immediate = .{
-                .cbz = .{ .Rt = rt, .imm19 = offset, .sf = sf },
+                .cbz = .{ .Rt = @enumFromInt(rt), .imm19 = offset, .sf = sf },
             } } };
         } else if (std.mem.eql(u8, op, "cbnz")) {
             return .{ .branch_exception_generating_system = .{ .compare_branch_immediate = .{
-                .cbnz = .{ .Rt = rt, .imm19 = offset, .sf = sf },
+                .cbnz = .{ .Rt = @enumFromInt(rt), .imm19 = offset, .sf = sf },
             } } };
         } else {
-            @compileError("Invalid compare and branch op: " ++ op);
+            @compileLog("Invalid compare and branch op:", op);
+            unreachable;
         }
     }
 
@@ -16622,16 +16624,16 @@ pub const Instruction = packed union {
         imm6: u6,
         set_flags: bool,
     ) Instruction {
-        const add_sub_op: DataProcessingRegister.AddSubtractOp = if (std.mem.eql(u8, op, "add") or std.mem.eql(u8, op, "adds"))
+        const add_sub_op: AddSubtractOp = if (std.mem.eql(u8, op, "add") or std.mem.eql(u8, op, "adds"))
             .add
         else
             .sub;
 
         return .{ .data_processing_register = .{ .add_subtract_shifted_register = .{ .group = .{
-            .Rd = rd,
-            .Rn = rn,
+            .Rd = @enumFromInt(rd),
+            .Rn = @enumFromInt(rn),
             .imm6 = imm6,
-            .Rm = rm,
+            .Rm = @enumFromInt(rm),
             .shift = shift,
             .S = set_flags,
             .op = add_sub_op,
@@ -16648,25 +16650,26 @@ pub const Instruction = packed union {
         rm: u5,
         cond: ConditionCode,
     ) Instruction {
-        const cs = DataProcessingRegister.ConditionalSelect;
+        _ = DataProcessingRegister.ConditionalSelect; // Type exists but we don't need it here
         if (std.mem.eql(u8, op, "csel")) {
             return .{ .data_processing_register = .{ .conditional_select = .{
-                .csel = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+                .csel = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
             } } };
         } else if (std.mem.eql(u8, op, "csinc")) {
             return .{ .data_processing_register = .{ .conditional_select = .{
-                .csinc = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+                .csinc = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
             } } };
         } else if (std.mem.eql(u8, op, "csinv")) {
             return .{ .data_processing_register = .{ .conditional_select = .{
-                .csinv = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+                .csinv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
             } } };
         } else if (std.mem.eql(u8, op, "csneg")) {
             return .{ .data_processing_register = .{ .conditional_select = .{
-                .csneg = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+                .csneg = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
             } } };
         } else {
-            @compileError("Invalid conditional select op: " ++ op);
+            @compileLog("Invalid conditional select op:", op);
+            unreachable;
         }
     }
 
@@ -16686,7 +16689,8 @@ pub const Instruction = packed union {
             } } };
         } else {
             _ = opc; // May be needed for other variants
-            @compileError("Invalid exception generation op: " ++ op);
+            @compileLog("Invalid exception generation op:", op);
+            unreachable;
         }
     }
 
@@ -16705,8 +16709,110 @@ pub const Instruction = packed union {
                 .isb = .{ .CRm = option },
             } } };
         } else {
-            @compileError("Invalid barrier op: " ++ op);
+            @compileLog("Invalid barrier op:", op);
+            unreachable;
         }
+    }
+
+    // ========================================================================
+    // Stubbed functions - to be implemented
+    // ========================================================================
+
+    /// Stub: Data processing three source (MADD, MSUB, etc)
+    /// TODO: Implement proper encoding
+    pub fn dataProcessingThreeSource(
+        sf: Register.GeneralSize,
+        opcode: u3,
+        rm: u5,
+        ra: u5,
+        rn: u5,
+        rd: u5,
+    ) error{UnimplementedInstruction}!Instruction {
+        _ = sf;
+        _ = opcode;
+        _ = rm;
+        _ = ra;
+        _ = rn;
+        _ = rd;
+        return error.UnimplementedInstruction;
+    }
+
+    /// Stub: Data processing two source (UDIV, SDIV, LSLV, etc)
+    /// TODO: Implement proper encoding
+    pub fn dataProcessingTwoSource(
+        sf: Register.GeneralSize,
+        opcode: u6,
+        rm: u5,
+        imm: u6,
+        rn: u5,
+        rd: u5,
+    ) error{UnimplementedInstruction}!Instruction {
+        _ = sf;
+        _ = opcode;
+        _ = rm;
+        _ = imm;
+        _ = rn;
+        _ = rd;
+        return error.UnimplementedInstruction;
+    }
+
+    /// Stub: Logical shifted register (AND, ORR, EOR, etc with shifts)
+    /// TODO: Implement proper encoding
+    pub fn logicalShiftedRegister(
+        comptime op: anytype,
+        sf: Register.GeneralSize,
+        shift: DataProcessingRegister.Shift.Op,
+        imm6: u6,
+        rm: u5,
+        imm: u6,
+        rn: u5,
+        rd: u5,
+        n: bool,
+    ) error{UnimplementedInstruction}!Instruction {
+        _ = op;
+        _ = sf;
+        _ = shift;
+        _ = imm6;
+        _ = rm;
+        _ = imm;
+        _ = rn;
+        _ = rd;
+        _ = n;
+        return error.UnimplementedInstruction;
+    }
+
+    /// Stub: Move wide immediate (MOVZ, MOVN, MOVK)
+    /// TODO: Implement proper encoding
+    pub fn moveWideImmediate(
+        comptime op: anytype,
+        sf: Register.GeneralSize,
+        hw: u2,
+        imm16: u16,
+        rd: u5,
+    ) error{UnimplementedInstruction}!Instruction {
+        _ = op;
+        _ = sf;
+        _ = hw;
+        _ = imm16;
+        _ = rd;
+        return error.UnimplementedInstruction;
+    }
+
+    /// Stub: Load/store register immediate (LDR, STR with immediate offset)
+    /// TODO: Implement proper encoding
+    pub fn loadStoreRegisterImmediate(
+        comptime op: []const u8,
+        sz: u2,
+        rt: u5,
+        rn: u5,
+        offset: i12,
+    ) error{UnimplementedInstruction}!Instruction {
+        _ = op;
+        _ = sz;
+        _ = rt;
+        _ = rn;
+        _ = offset;
+        return error.UnimplementedInstruction;
     }
 
     pub fn format(inst: Instruction, writer: *std.Io.Writer) std.Io.Writer.Error!void {
