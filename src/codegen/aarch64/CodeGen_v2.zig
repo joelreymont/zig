@@ -840,6 +840,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .atomic_store_release => self.airAtomicStore(inst, .release),
         .atomic_store_seq_cst => self.airAtomicStore(inst, .seq_cst),
         .atomic_rmw => self.airAtomicRmw(inst),
+        .cmpxchg_weak => self.airCmpxchg(inst, true),
+        .cmpxchg_strong => self.airCmpxchg(inst, false),
 
         // No-ops
         .dbg_stmt => {},
@@ -3688,6 +3690,15 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
     // For compatibility, we may need to use LDXR/STXR loop for older cores
     _ = inst;
     return self.fail("TODO: atomic_rmw requires LDXR/STXR loop or LSE instructions", .{});
+}
+
+fn airCmpxchg(self: *CodeGen, inst: Air.Inst.Index, comptime is_weak: bool) !void {
+    // Compare-and-exchange (CAS) operation
+    // ARM64 uses LDXR/STXR (load-exclusive/store-exclusive) loop
+    // Weak version can spuriously fail, strong version must only fail on actual mismatch
+    _ = inst;
+    _ = is_weak;
+    return self.fail("TODO: cmpxchg requires LDXR/STXR exclusive access loop", .{});
 }
 
 fn airFence(self: *CodeGen, inst: Air.Inst.Index) !void {
