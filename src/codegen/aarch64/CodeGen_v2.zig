@@ -721,9 +721,6 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
         .ret => self.airRet(inst),
         .ret_load => self.airRetLoad(inst),
 
-        // Constants
-        .constant => self.airConstant(inst),
-
         // Type conversions
         .intcast => self.airIntCast(inst),
         .trunc => self.airTrunc(inst),

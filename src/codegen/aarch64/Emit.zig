@@ -24,7 +24,7 @@ pub fn emitMir(
     atom_index: u32,
     w: *std.Io.Writer,
     debug_output: link.File.DebugInfoOutput,
-) error{ CodegenFail, OutOfMemory, Overflow, RelocationNotByteAligned, WriteFailed, InvalidImmediate, InvalidOperands, InvalidRegister, PseudoInstruction, UnimplementedInstruction }!void {
+) error{ CodegenFail, OutOfMemory, Overflow, RelocationNotByteAligned, WriteFailed }!void {
     const zcu = pt.zcu;
     const gpa = zcu.gpa;
     const func = zcu.funcInfo(func_index);
@@ -42,7 +42,16 @@ pub fn emitMir(
     defer lower.deinit();
 
     // Lower MIR to machine instructions
-    try lower.lowerMir();
+    // Convert encoder-specific errors to CodegenFail
+    lower.lowerMir() catch |err| switch (err) {
+        error.InvalidImmediate,
+        error.InvalidOperands,
+        error.InvalidRegister,
+        error.PseudoInstruction,
+        error.UnimplementedInstruction,
+        => return error.CodegenFail,
+        else => |e| return e,
+    };
 
     // Write instructions to output
     const start_offset = w.end;

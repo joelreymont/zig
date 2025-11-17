@@ -254,7 +254,7 @@ fn applyRelocations(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow }!vo
             .adrp_page, .add_pageoff, .literal_19 => {
                 // These would be handled for position-independent code
                 // Not implemented in this initial version
-                return error.UnimplementedRelocation;
+                return error.CodegenFail;
             },
         }
     }
