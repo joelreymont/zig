@@ -771,47 +771,51 @@ fn encodeFadd(inst: Mir.Inst) Error!Instruction {
     // FADD Dd, Dn, Dm (scalar floating point add, double precision)
     // TODO: Handle different float sizes (f16, f32, f64)
     // For now, assume f64 (double precision)
-    return Instruction.floatingPointDataProcessingTwoSource(
-        .fadd,
-        .@"64",
-        data.rm.id(),
-        data.rn.id(),
-        data.rd.id(),
-    );
+    return .{ .data_processing_vector = .{ .float_data_processing_two_source = .{
+        .fadd = .{
+            .Rd = @enumFromInt(data.rd.id()),
+            .Rn = @enumFromInt(data.rn.id()),
+            .Rm = @enumFromInt(data.rm.id()),
+            .ftype = .double,
+        },
+    } } };
 }
 
 fn encodeFsub(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rrr;
     // FSUB Dd, Dn, Dm (scalar floating point subtract, double precision)
-    return Instruction.floatingPointDataProcessingTwoSource(
-        .fsub,
-        .@"64",
-        data.rm.id(),
-        data.rn.id(),
-        data.rd.id(),
-    );
+    return .{ .data_processing_vector = .{ .float_data_processing_two_source = .{
+        .fsub = .{
+            .Rd = @enumFromInt(data.rd.id()),
+            .Rn = @enumFromInt(data.rn.id()),
+            .Rm = @enumFromInt(data.rm.id()),
+            .ftype = .double,
+        },
+    } } };
 }
 
 fn encodeFmul(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rrr;
     // FMUL Dd, Dn, Dm (scalar floating point multiply, double precision)
-    return Instruction.floatingPointDataProcessingTwoSource(
-        .fmul,
-        .@"64",
-        data.rm.id(),
-        data.rn.id(),
-        data.rd.id(),
-    );
+    return .{ .data_processing_vector = .{ .float_data_processing_two_source = .{
+        .fmul = .{
+            .Rd = @enumFromInt(data.rd.id()),
+            .Rn = @enumFromInt(data.rn.id()),
+            .Rm = @enumFromInt(data.rm.id()),
+            .ftype = .double,
+        },
+    } } };
 }
 
 fn encodeFdiv(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rrr;
     // FDIV Dd, Dn, Dm (scalar floating point divide, double precision)
-    return Instruction.floatingPointDataProcessingTwoSource(
-        .fdiv,
-        .@"64",
-        data.rm.id(),
-        data.rn.id(),
-        data.rd.id(),
-    );
+    return .{ .data_processing_vector = .{ .float_data_processing_two_source = .{
+        .fdiv = .{
+            .Rd = @enumFromInt(data.rd.id()),
+            .Rn = @enumFromInt(data.rn.id()),
+            .Rm = @enumFromInt(data.rm.id()),
+            .ftype = .double,
+        },
+    } } };
 }
