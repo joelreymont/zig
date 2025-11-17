@@ -633,7 +633,7 @@ fn encodeCbz(inst: Mir.Inst) Error!Instruction {
     const sf: u1 = if (data.rn.isGeneralPurpose() and @intFromEnum(data.rn) < 31) 1 else 0;
     // Offset will be filled in by Lower.zig
     return Instruction.compareAndBranchImmediate(
-        .cbz,
+        "cbz",
         @enumFromInt(sf),
         0,
         data.rn.id(),
@@ -645,7 +645,7 @@ fn encodeCbnz(inst: Mir.Inst) Error!Instruction {
     const sf: u1 = if (data.rn.isGeneralPurpose() and @intFromEnum(data.rn) < 31) 1 else 0;
     // Offset will be filled in by Lower.zig
     return Instruction.compareAndBranchImmediate(
-        .cbnz,
+        "cbnz",
         @enumFromInt(sf),
         0,
         data.rn.id(),
@@ -663,7 +663,7 @@ fn encodeCmp(inst: Mir.Inst) Error!Instruction {
             const data = inst.data.rr;
             const sf: u1 = if (data.rn.isGeneralPurpose() and @intFromEnum(data.rn) < 31) 1 else 0;
             break :blk Instruction.addSubtractShiftedRegister(
-                .sub,
+                "subs",
                 @enumFromInt(sf),
                 31, // XZR/WZR
                 data.rn.id(),
@@ -677,15 +677,8 @@ fn encodeCmp(inst: Mir.Inst) Error!Instruction {
             const data = inst.data.ri;
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             if (data.imm > 0xFFF) return error.InvalidImmediate;
-            break :blk Instruction.addSubtractImmediate(
-                .sub,
-                @enumFromInt(sf),
-                31, // XZR/WZR
-                data.rd.id(),
-                @intCast(data.imm),
-                .unshifted,
-                true, // Set flags
-            );
+            // TODO: addSubtractImmediate not yet implemented
+            return error.UnimplementedInstruction;
         },
         else => error.InvalidOperands,
     };
@@ -696,7 +689,7 @@ fn encodeCmn(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rr;
     const sf: u1 = if (data.rn.isGeneralPurpose() and @intFromEnum(data.rn) < 31) 1 else 0;
     return Instruction.addSubtractShiftedRegister(
-        .add,
+        "adds",
         @enumFromInt(sf),
         31, // XZR/WZR
         data.rn.id(),
@@ -715,12 +708,12 @@ fn encodeCsel(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rrrc;
     const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
     return Instruction.conditionalSelect(
+        "csel",
         @enumFromInt(sf),
+        data.rd.id(),
+        data.rn.id(),
         data.rm.id(),
         conditionToCode(data.cond),
-        0b00, // CSEL
-        data.rn.id(),
-        data.rd.id(),
     );
 }
 
@@ -728,12 +721,12 @@ fn encodeCsinc(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rrrc;
     const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
     return Instruction.conditionalSelect(
+        "csinc",
         @enumFromInt(sf),
+        data.rd.id(),
+        data.rn.id(),
         data.rm.id(),
         conditionToCode(data.cond),
-        0b01, // CSINC
-        data.rn.id(),
-        data.rd.id(),
     );
 }
 
@@ -742,12 +735,12 @@ fn encodeCset(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.rrc;
     const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
     return Instruction.conditionalSelect(
+        "csinc",
         @enumFromInt(sf),
+        data.rd.id(),
+        31, // XZR/WZR
         31, // XZR/WZR
         conditionToCode(data.cond.negate()),
-        0b01, // CSINC
-        31, // XZR/WZR
-        data.rd.id(),
     );
 }
 
@@ -762,17 +755,17 @@ fn encodeNop() Instruction {
 fn encodeBrk(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.imm;
     if (data > 0xFFFF) return error.InvalidImmediate;
-    return Instruction.exceptionGeneration(.brk, @intCast(data), 0b001);
+    return Instruction.exceptionGeneration("brk", @intCast(data), 0b001);
 }
 
 fn encodeDmb() Instruction {
-    return Instruction.barriers(.dmb, .sy);
+    return Instruction.barriers("dmb", .sy);
 }
 
 fn encodeDsb() Instruction {
-    return Instruction.barriers(.dsb, .sy);
+    return Instruction.barriers("dsb", .sy);
 }
 
 fn encodeIsb() Instruction {
-    return Instruction.barriers(.isb, .sy);
+    return Instruction.barriers("isb", .sy);
 }

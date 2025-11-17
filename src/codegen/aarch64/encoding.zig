@@ -16546,6 +16546,169 @@ pub const Instruction = packed union {
         std.mem.writeInt(Backing, mem, @bitCast(inst), .little);
     }
 
+    // ========================================================================
+    // Low-level encoding helper functions for code generation
+    // ========================================================================
+
+    /// Create unconditional branch immediate instruction (B or BL)
+    pub fn unconditionalBranchImmediate(op: BranchExceptionGeneratingSystem.UnconditionalBranchImmediate.Op, offset: i26) Instruction {
+        return .{ .branch_exception_generating_system = .{ .unconditional_branch_immediate = switch (op) {
+            .b => .{ .b = .{ .imm26 = offset } },
+            .bl => .{ .bl = .{ .imm26 = offset } },
+        } } };
+    }
+
+    /// Create unconditional branch register instruction (BR, BLR, RET)
+    pub fn unconditionalBranchRegister(
+        comptime op: []const u8,
+        a: u1,
+        m: u1,
+        rn: u5,
+        rm: u5,
+    ) Instruction {
+        const br = BranchExceptionGeneratingSystem.UnconditionalBranchRegister;
+        if (std.mem.eql(u8, op, "br")) {
+            return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
+                .br = .{ .A = a, .M = m, .Rn = rn, .Rm = rm },
+            } } };
+        } else if (std.mem.eql(u8, op, "blr")) {
+            return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
+                .blr = .{ .A = a, .M = m, .Rn = rn, .Rm = rm },
+            } } };
+        } else if (std.mem.eql(u8, op, "ret")) {
+            return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
+                .ret = .{ .Rn = rn },
+            } } };
+        } else {
+            @compileError("Invalid unconditional branch register op: " ++ op);
+        }
+    }
+
+    /// Create conditional branch immediate instruction (B.cond)
+    pub fn conditionalBranchImmediate(offset: i19, cond: ConditionCode) Instruction {
+        return .{ .branch_exception_generating_system = .{ .conditional_branch_immediate = .{
+            .b = .{ .imm19 = offset, .cond = cond },
+        } } };
+    }
+
+    /// Create compare and branch immediate instruction (CBZ, CBNZ)
+    pub fn compareAndBranchImmediate(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        offset: i19,
+        rt: u5,
+    ) Instruction {
+        if (std.mem.eql(u8, op, "cbz")) {
+            return .{ .branch_exception_generating_system = .{ .compare_branch_immediate = .{
+                .cbz = .{ .Rt = rt, .imm19 = offset, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "cbnz")) {
+            return .{ .branch_exception_generating_system = .{ .compare_branch_immediate = .{
+                .cbnz = .{ .Rt = rt, .imm19 = offset, .sf = sf },
+            } } };
+        } else {
+            @compileError("Invalid compare and branch op: " ++ op);
+        }
+    }
+
+    /// Create add/subtract shifted register instruction
+    pub fn addSubtractShiftedRegister(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        rd: u5,
+        rn: u5,
+        rm: u5,
+        shift: DataProcessingRegister.Shift.Op,
+        imm6: u6,
+        set_flags: bool,
+    ) Instruction {
+        const add_sub_op: DataProcessingRegister.AddSubtractOp = if (std.mem.eql(u8, op, "add") or std.mem.eql(u8, op, "adds"))
+            .add
+        else
+            .sub;
+
+        return .{ .data_processing_register = .{ .add_subtract_shifted_register = .{ .group = .{
+            .Rd = rd,
+            .Rn = rn,
+            .imm6 = imm6,
+            .Rm = rm,
+            .shift = shift,
+            .S = set_flags,
+            .op = add_sub_op,
+            .sf = sf,
+        } } } };
+    }
+
+    /// Create conditional select instruction (CSEL, CSINC, CSINV, CSNEG)
+    pub fn conditionalSelect(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        rd: u5,
+        rn: u5,
+        rm: u5,
+        cond: ConditionCode,
+    ) Instruction {
+        const cs = DataProcessingRegister.ConditionalSelect;
+        if (std.mem.eql(u8, op, "csel")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csel = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "csinc")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csinc = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "csinv")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csinv = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "csneg")) {
+            return .{ .data_processing_register = .{ .conditional_select = .{
+                .csneg = .{ .Rd = rd, .Rn = rn, .Rm = rm, .cond = cond, .sf = sf },
+            } } };
+        } else {
+            @compileError("Invalid conditional select op: " ++ op);
+        }
+    }
+
+    /// Create exception generation instruction (SVC, HVC, SMC, BRK, HLT)
+    pub fn exceptionGeneration(comptime op: []const u8, imm16: u16, opc: u3) Instruction {
+        if (std.mem.eql(u8, op, "brk")) {
+            return .{ .branch_exception_generating_system = .{ .exception_generating = .{
+                .brk = .{ .imm16 = imm16 },
+            } } };
+        } else if (std.mem.eql(u8, op, "hlt")) {
+            return .{ .branch_exception_generating_system = .{ .exception_generating = .{
+                .hlt = .{ .imm16 = imm16 },
+            } } };
+        } else if (std.mem.eql(u8, op, "svc")) {
+            return .{ .branch_exception_generating_system = .{ .exception_generating = .{
+                .svc = .{ .imm16 = imm16 },
+            } } };
+        } else {
+            _ = opc; // May be needed for other variants
+            @compileError("Invalid exception generation op: " ++ op);
+        }
+    }
+
+    /// Create barrier instruction (DMB, DSB, ISB)
+    pub fn barriers(comptime op: []const u8, option: BranchExceptionGeneratingSystem.Barriers.Option) Instruction {
+        if (std.mem.eql(u8, op, "dmb")) {
+            return .{ .branch_exception_generating_system = .{ .barriers = .{
+                .dmb = .{ .CRm = option },
+            } } };
+        } else if (std.mem.eql(u8, op, "dsb")) {
+            return .{ .branch_exception_generating_system = .{ .barriers = .{
+                .dsb = .{ .CRm = option },
+            } } };
+        } else if (std.mem.eql(u8, op, "isb")) {
+            return .{ .branch_exception_generating_system = .{ .barriers = .{
+                .isb = .{ .CRm = option },
+            } } };
+        } else {
+            @compileError("Invalid barrier op: " ++ op);
+        }
+    }
+
     pub fn format(inst: Instruction, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const dis: aarch64.Disassemble = .{};
         try dis.printInstruction(inst, writer);
