@@ -2386,46 +2386,121 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     const callee = pl_op.operand;
 
-    // ARM64 calling convention: first 8 integer args in X0-X7
-    // TODO: Handle more than 8 args (stack), float args (D0-D7), and return values
+    // ARM64 calling convention (AAPCS64):
+    // - First 8 integer/pointer args in X0-X7
+    // - First 8 FP/SIMD args in V0-V7
+    // - Additional args on stack (8-byte aligned, 16-byte stack alignment)
 
-    // Marshal arguments to argument registers
+    // Calculate stack space needed for overflow arguments
+    const stack_arg_count = if (args.len > 8) args.len - 8 else 0;
+    const stack_arg_bytes = stack_arg_count * 8; // Each arg is 8 bytes
+    // Round up to 16-byte alignment
+    const stack_space = std.mem.alignForward(u32, @intCast(stack_arg_bytes), 16);
+
+    // Adjust SP for stack arguments if needed
+    if (stack_space > 0) {
+        try self.addInst(.{
+            .tag = .sub,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = .sp,
+                .rn = .sp,
+                .imm = stack_space,
+            } },
+        });
+    }
+
+    // Marshal arguments to registers and stack
     for (args, 0..) |arg, i| {
-        if (i >= 8) {
-            // TODO: Stack arguments
-            return self.fail("TODO: ARM64 function calls with >8 arguments not yet supported", .{});
-        }
-
         const arg_mcv = try self.resolveInst(arg.toIndex().?);
-        const arg_reg = Register.x0.offset(@intCast(i)); // X0, X1, X2, ..., X7
+        const arg_ty = self.typeOf(arg);
+        const is_float = arg_ty.isRuntimeFloat();
 
-        // Move argument to the appropriate register
-        switch (arg_mcv) {
-            .register => |reg| {
-                if (reg.id() != arg_reg.id()) {
+        if (i < 8) {
+            // Register arguments
+            const arg_reg = if (is_float)
+                Register.v0.offset(@intCast(i))
+            else
+                Register.x0.offset(@intCast(i));
+
+            // Move argument to the appropriate register
+            switch (arg_mcv) {
+                .register => |reg| {
+                    if (reg.id() != arg_reg.id()) {
+                        try self.addInst(.{
+                            .tag = .mov,
+                            .ops = .rr,
+                            .data = .{ .rr = .{
+                                .rd = arg_reg,
+                                .rn = reg,
+                            } },
+                        });
+                    }
+                },
+                .immediate => |imm| {
+                    // Load immediate to argument register
                     try self.addInst(.{
-                        .tag = .mov,
-                        .ops = .rr,
-                        .data = .{ .rr = .{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{
                             .rd = arg_reg,
-                            .rn = reg,
+                            .imm = @intCast(imm & 0xFFFF),
                         } },
                     });
-                }
-            },
-            .immediate => |imm| {
-                // Load immediate to argument register
-                try self.addInst(.{
-                    .tag = .movz,
-                    .ops = .ri,
-                    .data = .{ .ri = .{
-                        .rd = arg_reg,
-                        .imm = @intCast(imm & 0xFFFF),
-                    } },
-                });
-                // TODO: Handle larger immediates with MOVK
-            },
-            else => return self.fail("TODO: ARM64 airCall with arg type {}", .{arg_mcv}),
+                    if (imm > 0xFFFF) {
+                        try self.addInst(.{
+                            .tag = .movk,
+                            .ops = .ri,
+                            .data = .{ .ri = .{
+                                .rd = arg_reg,
+                                .imm = @intCast((imm >> 16) & 0xFFFF),
+                            } },
+                        });
+                    }
+                },
+                else => return self.fail("TODO: ARM64 airCall with arg type {}", .{arg_mcv}),
+            }
+        } else {
+            // Stack arguments (args 8+)
+            const stack_offset = @as(i32, @intCast((i - 8) * 8));
+
+            switch (arg_mcv) {
+                .register => |reg| {
+                    // STR Xt, [SP, #offset]
+                    try self.addInst(.{
+                        .tag = .str,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = Memory.simple(.sp, stack_offset),
+                            .rs = reg,
+                        } },
+                    });
+                },
+                .immediate => |imm| {
+                    // Need temp register to hold immediate
+                    const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                    defer self.register_manager.freeReg(temp);
+
+                    try self.addInst(.{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{
+                            .rd = temp,
+                            .imm = @intCast(imm & 0xFFFF),
+                        } },
+                    });
+
+                    try self.addInst(.{
+                        .tag = .str,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = Memory.simple(.sp, stack_offset),
+                            .rs = temp,
+                        } },
+                    });
+                },
+                else => return self.fail("TODO: ARM64 airCall stack arg type {}", .{arg_mcv}),
+            }
         }
     }
 
@@ -2450,6 +2525,19 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
             // This needs proper symbol resolution
             return self.fail("TODO: ARM64 direct function calls need symbol resolution", .{});
         },
+    }
+
+    // Restore stack pointer if we adjusted it for stack arguments
+    if (stack_space > 0) {
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = .sp,
+                .rn = .sp,
+                .imm = stack_space,
+            } },
+        });
     }
 
     // Track return value in X0
@@ -3305,25 +3393,43 @@ fn airArg(self: *CodeGen, inst: Air.Inst.Index) !void {
     // Determine if this is a float or integer argument
     const is_float = arg_ty.isRuntimeFloat();
 
-    // For now, simplified: assume all args fit in registers
-    // TODO: Handle stack arguments when >8 args
-    if (arg_index >= 8) {
-        return self.fail("TODO: ARM64 stack arguments not yet implemented", .{});
+    if (arg_index < 8) {
+        // Register arguments (0-7)
+        const src_reg = if (is_float)
+            // Float args in V0-V7 (D0-D7)
+            Register.v0.offset(@intCast(arg_index))
+        else
+            // Integer args in X0-X7
+            Register.x0.offset(@intCast(arg_index));
+
+        // Mark the register as occupied by this instruction
+        self.register_manager.getRegAssumeFree(src_reg, inst);
+
+        // Track the argument value
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = src_reg }));
+    } else {
+        // Stack arguments (8+)
+        // Arguments on stack are at [FP + 16 + (arg_index - 8) * 8]
+        // The +16 accounts for saved FP and LR
+        const stack_offset = @as(i32, @intCast(16 + (arg_index - 8) * 8));
+
+        // Allocate a register to load the argument into
+        const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+        const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+        // LDR Xt, [FP, #offset]
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(.x29, stack_offset), // FP
+            } },
+        });
+
+        // Track the argument value
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
     }
-
-    // Determine which register the argument is in
-    const src_reg = if (is_float)
-        // Float args in V0-V7 (D0-D7)
-        Register.v0.offset(@intCast(arg_index))
-    else
-        // Integer args in X0-X7
-        Register.x0.offset(@intCast(arg_index));
-
-    // Mark the register as occupied by this instruction
-    self.register_manager.getRegAssumeFree(src_reg, inst);
-
-    // Track the argument value
-    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = src_reg }));
 }
 
 fn airUnreachable(self: *CodeGen, inst: Air.Inst.Index) !void {
