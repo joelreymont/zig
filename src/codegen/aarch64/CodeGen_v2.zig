@@ -1408,8 +1408,8 @@ fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airPtrSub(self: *CodeGen, inst: Air.Inst.Index) !void {
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
-    const ptr = try self.resolveInst(bin_op.lhs);
-    const offset = try self.resolveInst(bin_op.rhs);
+    const ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const offset = try self.resolveInst(bin_op.rhs.toIndex().?);
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
@@ -1429,7 +1429,7 @@ fn airPtrSub(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airSlicePtr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const slice = try self.resolveInst(ty_op.operand);
+    const slice = try self.resolveInst(ty_op.operand.toIndex().?);
 
     // Slice is represented as { ptr, len } pair
     // For register_pair, first register is the pointer
@@ -1443,7 +1443,7 @@ fn airSlicePtr(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airSliceLen(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
-    const slice = try self.resolveInst(ty_op.operand);
+    const slice = try self.resolveInst(ty_op.operand.toIndex().?);
 
     // Slice is represented as { ptr, len } pair
     // For register_pair, second register is the length
