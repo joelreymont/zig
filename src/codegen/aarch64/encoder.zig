@@ -267,7 +267,6 @@ fn encodeSdiv(inst: Mir.Inst) Error!Instruction {
         @enumFromInt(sf),
         0b000011, // SDIV
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
     );
@@ -280,7 +279,6 @@ fn encodeUdiv(inst: Mir.Inst) Error!Instruction {
         @enumFromInt(sf),
         0b000010, // UDIV
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
     );
@@ -299,7 +297,6 @@ fn encodeAnd(inst: Mir.Inst) Error!Instruction {
         .lsl,
         0,
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
         false,
@@ -315,7 +312,6 @@ fn encodeOrr(inst: Mir.Inst) Error!Instruction {
         .lsl,
         0,
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
         false,
@@ -331,7 +327,6 @@ fn encodeEor(inst: Mir.Inst) Error!Instruction {
         .lsl,
         0,
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
         false,
@@ -348,7 +343,6 @@ fn encodeMvn(inst: Mir.Inst) Error!Instruction {
         .lsl,
         0,
         data.rn.id(),
-        0,
         31, // XZR/WZR
         data.rd.id(),
         false,
@@ -367,7 +361,6 @@ fn encodeLsl(inst: Mir.Inst) Error!Instruction {
         @enumFromInt(sf),
         0b001000, // LSLV
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
     );
@@ -381,7 +374,6 @@ fn encodeLsr(inst: Mir.Inst) Error!Instruction {
         @enumFromInt(sf),
         0b001001, // LSRV
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
     );
@@ -395,7 +387,6 @@ fn encodeAsr(inst: Mir.Inst) Error!Instruction {
         @enumFromInt(sf),
         0b001010, // ASRV
         data.rm.id(),
-        0,
         data.rn.id(),
         data.rd.id(),
     );

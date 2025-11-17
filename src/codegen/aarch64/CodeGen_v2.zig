@@ -513,7 +513,7 @@ fn resolveCallingConventionValues(
                             .index = stack_frame_base,
                             .off = result.stack_byte_count,
                         } };
-                        result.stack_byte_count += param_size;
+                        result.stack_byte_count = @intCast(result.stack_byte_count + param_size);
                     },
                 }
             }
