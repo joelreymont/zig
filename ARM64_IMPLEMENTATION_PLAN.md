@@ -39,33 +39,29 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 ### Phase 1: Core Functionality (NEXT - Priority 1)
 **Goal**: Make the backend usable for simple programs
 
-#### 1.1 Function Calls ⚠️ CRITICAL
+#### 1.1 Function Calls ✅ BASIC IMPLEMENTATION COMPLETE
 **File**: `src/codegen/aarch64/CodeGen_v2.zig`
-**Status**: TODO
+**Status**: ✅ Basic implementation done (Commit: 26dabcfe)
 **Complexity**: HIGH
 
-Missing AIR instructions:
-- `call` - function calls
-- `ret_ptr` - return pointer for structs
-- Proper calling convention parameter passing
-- Stack alignment for calls
+**Completed**:
+- ✅ Implemented `airCall()` function
+- ✅ Added call/call_always_tail/call_never_tail/call_never_inline to genInst
+- ✅ Parameter passing for up to 8 integer args (X0-X7)
+- ✅ Return value tracking in X0
+- ✅ BLR (branch with link to register) support
+- ✅ Added Register.offset() helper method
 
-Current blockers:
-```zig
-// Line 524: CodeGen_v2.zig
-else => return self.fail("TODO implement function parameters
-    and return values for {} on ARM64", .{cc});
-```
+**Remaining tasks**:
+- [ ] Stack arguments (>8 parameters)
+- [ ] Direct function calls (BL with symbol resolution)
+- [ ] Floating point arguments (D0-D7)
+- [ ] Structure passing by value
+- [ ] HFA (Homogeneous Floating-point Aggregate) passing
+- [ ] Return values in multiple registers
+- [ ] Proper stack frame setup for outgoing args
 
-Implementation tasks:
-- [ ] Implement parameter passing (registers X0-X7, stack overflow)
-- [ ] Implement return value handling (X0 for integers, D0 for floats)
-- [ ] Handle structure passing (by value vs by reference)
-- [ ] Implement proper stack frame setup for outgoing args
-- [ ] Add BL/BLR instruction support
-- [ ] Handle HFA (Homogeneous Floating-point Aggregate) passing
-
-**Estimated effort**: 2-3 hours
+**Status**: Basic calls work for simple functions!
 
 #### 1.2 Stack Allocation ⚠️ CRITICAL
 **File**: `src/codegen/aarch64/CodeGen_v2.zig`

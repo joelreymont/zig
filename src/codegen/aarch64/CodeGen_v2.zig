@@ -739,6 +739,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .ptr_add => self.airPtrAdd(inst),
         .ptr_sub => self.airPtrSub(inst),
 
+        // Memory allocation
+        .alloc => self.airAlloc(inst),
+
         // Slice operations
         .slice_ptr => self.airSlicePtr(inst),
         .slice_len => self.airSliceLen(inst),
@@ -1517,6 +1520,49 @@ fn airPtrSub(self: *CodeGen, inst: Air.Inst.Index) !void {
             .rm = offset.register,
         } },
     });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airAlloc(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ptr_ty = self.typeOfIndex(inst);
+    const pointee_ty = ptr_ty.childType(self.pt.zcu);
+
+    // Check if type has runtime bits
+    if (!pointee_ty.isFnOrHasRuntimeBitsIgnoreComptime(self.pt.zcu)) {
+        // Zero-sized type - return a dummy pointer (stack pointer is fine)
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = .sp }));
+        return;
+    }
+
+    const zcu = self.pt.zcu;
+    const size = pointee_ty.abiSize(zcu);
+    const alignment = ptr_ty.ptrAlignment(zcu);
+
+    // TODO: Track stack allocations properly and adjust SP in prologue
+    // For now, we'll use a simplified approach
+
+    // Allocate a register to hold the stack address
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Simple approach: just use SP as the pointer
+    // TODO: Properly track stack frame layout and offsets
+    // TODO: Adjust SP in prologue based on total stack usage
+
+    // MOV Xd, SP
+    try self.addInst(.{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = .sp,
+        } },
+    });
+
+    // TODO: Subtract space from SP for the allocation
+    // For now, we'll pretend the space is already allocated
+    _ = size;
+    _ = alignment;
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
