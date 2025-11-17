@@ -109,7 +109,7 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
 
 **Files Created:**
 
-7. **`CodeGen_v2.zig`** (now ~870 lines, enhanced)
+7. **`CodeGen_v2.zig`** (now 1,416 lines, heavily enhanced)
    - Main code generator: AIR → MIR translation
    - `generate()` entry point matching x86_64 signature
    - Liveness-based register allocation integration
@@ -144,15 +144,20 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
 
 | Category | Instructions | Status |
 |----------|-------------|--------|
-| **Arithmetic** | add, sub, mul | ✅ Complete |
-| **Bitwise** | bit_and, bit_or, xor | ✅ Complete |
+| **Arithmetic** | add, sub, mul, div_trunc, div_exact, rem, mod, neg | ✅ Complete |
+| **Bitwise** | bit_and, bit_or, xor, not | ✅ Complete |
 | **Shifts** | shl, shr | ✅ Complete |
 | **Memory** | load, store | ✅ Complete |
 | **Compare** | cmp_eq, cmp_neq, cmp_lt, cmp_lte, cmp_gt, cmp_gte | ✅ Complete |
 | **Branches** | br, cond_br | ✅ Partial (br only) |
 | **Control** | ret, ret_load | ✅ Complete |
 | **Constants** | constant | ✅ Basic |
+| **Type Conv** | intcast, trunc, bool_to_int | ✅ Complete |
+| **Pointers** | ptr_add, ptr_sub | ✅ Complete |
+| **Slices** | slice_ptr, slice_len | ✅ Complete |
 | **Blocks** | block | ✅ Basic |
+
+**Total:** ~36 AIR instruction types supported (up from initial 22)
 
 **AIR Handlers Pattern:**
 
@@ -181,23 +186,23 @@ fn airAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 ```
 
-**Total Phase 2:** ~734 lines, 1 new file
+**Total Phase 2:** 1,416 lines (initial 734 + expansions)
 
 ---
 
 ## File Statistics
 
 ```
-Total lines added: 3,267 (across 7 new files)
+Total lines added: 3,949 (across 7 new files)
 
 src/codegen/aarch64/
-├── bits.zig              372 lines  [Phase 1]
-├── abi.zig               +152 lines [Phase 1, enhanced]
-├── Mir_v2.zig            672 lines  [Phase 1]
-├── encoder.zig           638 lines  [Phase 1]
-├── Lower.zig             255 lines  [Phase 1]
-├── Emit.zig              126 lines  [Phase 1]
-└── CodeGen_v2.zig        734 lines  [Phase 2]
+├── bits.zig              372 lines   [Phase 1]
+├── abi.zig               +152 lines  [Phase 1, enhanced]
+├── Mir_v2.zig            672 lines   [Phase 1]
+├── encoder.zig           638 lines   [Phase 1]
+├── Lower.zig             255 lines   [Phase 1]
+├── Emit.zig              126 lines   [Phase 1]
+└── CodeGen_v2.zig        1,416 lines [Phase 2 + expansions]
 ```
 
 ---
@@ -394,7 +399,8 @@ src/codegen/aarch64/
 
 ### Important 🟡
 
-- [ ] **Only ~15 AIR instructions supported** - Need ~200+ more
+- [x] ~~**Only ~15 AIR instructions supported**~~ - ✅ Now ~36 (div, rem, mod, neg, not, intcast, trunc, ptr ops, slice ops)
+- [ ] **~164+ AIR instructions remaining** - Need more handlers for full coverage
 - [ ] **No SIMD/NEON** - Vector operations not implemented
 - [ ] **No floating-point** - FP arithmetic not implemented
 - [ ] **No debug info** - Emit.zig stubs only
