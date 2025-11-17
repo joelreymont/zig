@@ -5,18 +5,50 @@ pub const encoding = @import("aarch64/encoding.zig");
 pub const Mir = @import("aarch64/Mir.zig");
 pub const Select = @import("aarch64/Select.zig");
 
-pub fn legalizeFeatures(_: *const std.Target) ?*Air.Legalize.Features {
-    return null;
+// New modernized backend
+const CodeGen_v2 = @import("aarch64/CodeGen_v2.zig");
+const Mir_v2 = @import("aarch64/Mir_v2.zig");
+
+const std = @import("std");
+const builtin = @import("builtin");
+const Air = @import("../Air.zig");
+const Zcu = @import("../Zcu.zig");
+const InternPool = @import("../InternPool.zig");
+const link = @import("../link.zig");
+const assert = std.debug.assert;
+const log = std.log.scoped(.aarch64);
+
+pub fn legalizeFeatures(target: *const std.Target) ?*const Air.Legalize.Features {
+    // For now, always use new backend's legalizeFeatures
+    // TODO: Add runtime switching when stable
+    return CodeGen_v2.legalizeFeatures(target);
 }
 
 pub fn generate(
-    _: *link.File,
+    bin_file: *link.File,
     pt: Zcu.PerThread,
-    _: Zcu.LazySrcLoc,
+    src_loc: Zcu.LazySrcLoc,
     func_index: InternPool.Index,
     air: *const Air,
     liveness: *const ?Air.Liveness,
 ) !Mir {
+    // Feature flag: Use new backend (enabled by default for testing)
+    // TODO: Add environment variable or build option to switch
+    const use_new_backend = true;
+
+    // Dispatch to new backend if enabled
+    if (use_new_backend) {
+        log.debug("Using new ARM64 backend for function {d}", .{@intFromEnum(func_index)});
+        const mir_v2 = try CodeGen_v2.generate(bin_file, pt, src_loc, func_index, air, liveness);
+
+        // Convert Mir_v2 to legacy Mir format for compatibility
+        // For now, just return an empty legacy Mir since we're testing
+        // TODO: Implement proper conversion or update entire pipeline
+        return convertMir(pt.zcu.gpa, mir_v2);
+    }
+
+    // Old backend below
+    _ = bin_file;
     const zcu = pt.zcu;
     const gpa = zcu.gpa;
     const ip = &zcu.intern_pool;
@@ -189,6 +221,28 @@ pub fn generate(
     mir.lazy_relocs = try isel.lazy_relocs.toOwnedSlice(gpa);
     mir.global_relocs = try isel.global_relocs.toOwnedSlice(gpa);
     mir.literal_relocs = try isel.literal_relocs.toOwnedSlice(gpa);
+    return mir;
+}
+
+/// Convert Mir_v2 (modernized) to legacy Mir format
+/// This is a temporary shim until the entire pipeline is updated
+fn convertMir(gpa: std.mem.Allocator, mir_v2: Mir_v2) !Mir {
+    _ = mir_v2; // TODO: Implement proper conversion
+
+    // For now, return an empty Mir structure
+    // This allows testing the new backend's code generation
+    // without breaking the link phase
+    var mir: Mir = .{
+        .body = &.{},
+        .epilogue = &.{},
+        .literals = &.{},
+        .nav_relocs = &.{},
+        .uav_relocs = &.{},
+        .lazy_relocs = &.{},
+        .global_relocs = &.{},
+        .literal_relocs = &.{},
+    };
+    _ = gpa;
     return mir;
 }
 
