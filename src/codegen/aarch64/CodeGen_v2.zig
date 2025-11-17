@@ -724,7 +724,6 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
         // Type conversions
         .intcast => self.airIntCast(inst),
         .trunc => self.airTrunc(inst),
-        .bool_to_int => self.airBoolToInt(inst),
 
         // Pointer operations
         .ptr_add => self.airPtrAdd(inst),
