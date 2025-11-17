@@ -704,6 +704,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .neg => self.airNeg(inst),
         .min => self.airMinMax(inst, true),
         .max => self.airMinMax(inst, false),
+        .abs => self.airAbs(inst),
 
         // Bitwise
         .bit_and => self.airAnd(inst),
@@ -713,6 +714,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .clz => self.airClz(inst),
         .ctz => self.airCtz(inst),
         .popcount => self.airPopcount(inst),
+        .byte_swap => self.airByteSwap(inst),
+        .bit_reverse => self.airBitReverse(inst),
 
         // Boolean operations
         .bool_and => self.airBoolAnd(inst),
@@ -732,8 +735,11 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Select (ternary)
         .select => self.airSelect(inst),
 
+        // Vector operations
+        .splat => self.airSplat(inst),
+
         // Float operations
-        .sqrt, .abs => self.airUnaryFloatOp(inst),
+        .sqrt => self.airUnaryFloatOp(inst),
 
         // Branches
         .br => self.airBr(inst),
@@ -2791,6 +2797,149 @@ fn airSelect(self: *CodeGen, inst: Air.Inst.Index) !void {
             .rn = true_val.register,
             .rm = false_val.register,
             .cond = .ne, // not equal (condition is true/nonzero)
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airByteSwap(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const ty = self.typeOf(ty_op.operand);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    const zcu = self.pt.zcu;
+    const bit_size = ty.bitSize(zcu);
+
+    // ARM64 has REV instruction for byte swap
+    // REV reverses bytes in 32-bit or 64-bit register
+    if (bit_size == 16) {
+        // REV16 - reverse bytes in each halfword
+        try self.addInst(.{
+            .tag = .rev16,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    } else if (bit_size == 32) {
+        // REV32 for 32-bit (or REV Wd on 32-bit register)
+        try self.addInst(.{
+            .tag = .rev32,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg.to32(),
+                .rn = operand.register.to32(),
+            } },
+        });
+    } else if (bit_size == 64) {
+        // REV for 64-bit
+        try self.addInst(.{
+            .tag = .rev,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    } else {
+        return self.fail("TODO: byte_swap for {}-bit integers not yet implemented", .{bit_size});
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airBitReverse(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ARM64 has RBIT instruction to reverse all bits
+    try self.addInst(.{
+        .tag = .rbit,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airAbs(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const ty = self.typeOfIndex(inst);
+
+    const is_float = ty.isRuntimeFloat();
+
+    if (is_float) {
+        // Float absolute value - FABS
+        const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+        try self.addInst(.{
+            .tag = .fabs,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    } else {
+        // Integer absolute value
+        // ARM64 doesn't have a single ABS instruction for integers
+        // Use: CMP operand, #0; CNEG dst, operand, MI
+        // CNEG conditionally negates if condition is true
+        const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+        // Compare with zero
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = operand.register,
+                .rn = .xzr,
+            } },
+        });
+
+        // Conditionally negate if negative (MI = minus/negative)
+        try self.addInst(.{
+            .tag = .cneg,
+            .ops = .rrc,
+            .data = .{ .rrc = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+                .cond = .mi, // if negative
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    }
+}
+
+fn airSplat(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Splat broadcasts a scalar to all elements of a vector
+    // This requires NEON/SIMD support
+    // For now, use DUP instruction to duplicate scalar into vector
+    const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+    // DUP Vd.<T>, Rn - duplicate general-purpose register to vector
+    try self.addInst(.{
+        .tag = .dup,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
         } },
     });
 
