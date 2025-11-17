@@ -16790,13 +16790,43 @@ pub const Instruction = packed union {
         rn: u5,
         rd: u5,
     ) Instruction {
-        return .{ .data_processing_register = .{ .data_processing_two_source = .{
-            .sf = sf,
-            .opcode = opcode,
-            .Rm = @enumFromInt(rm),
-            .Rn = @enumFromInt(rn),
-            .Rd = @enumFromInt(rd),
-        } } };
+        // Dispatch based on opcode bits
+        // Bits [15:10] = opcode in the Group structure
+        // Bit [10] distinguishes between div ops and shift ops
+        const high_bits: u4 = @truncate(opcode >> 2);
+        const low_bits: u2 = @truncate(opcode & 0b11);
+
+        if (high_bits == 0b0000) {
+            // Division operations (UDIV, SDIV)
+            const div_op: DataProcessingRegister.DataProcessingTwoSource.DivOp = @enumFromInt(low_bits & 1);
+            if (div_op == .udiv) {
+                return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .udiv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .sdiv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } };
+            }
+        } else if (high_bits == 0b0010) {
+            // Shift operations (LSLV, LSRV, ASRV, RORV)
+            const shift_op: DataProcessingRegister.DataProcessingTwoSource.ShiftOp = @enumFromInt(low_bits);
+            switch (shift_op) {
+                .lslv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .lslv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+                .lsrv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .lsrv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+                .asrv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .asrv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+                .rorv => return .{ .data_processing_register = .{ .data_processing_two_source = .{
+                    .rorv = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .sf = sf },
+                } } },
+            }
+        }
+        unreachable; // Invalid opcode
     }
 
     /// Logical shifted register (AND, ORR, EOR, etc with shifts)
