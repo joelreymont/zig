@@ -691,11 +691,16 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
         .add => self.airAdd(inst),
         .sub => self.airSub(inst),
         .mul => self.airMul(inst),
+        .div_trunc, .div_exact => self.airDiv(inst),
+        .rem => self.airRem(inst),
+        .mod => self.airMod(inst),
+        .neg => self.airNeg(inst),
 
         // Bitwise
         .bit_and => self.airAnd(inst),
         .bit_or => self.airOr(inst),
         .xor => self.airXor(inst),
+        .not => self.airNot(inst),
 
         // Shifts
         .shl, .shl_exact => self.airShl(inst),
@@ -718,6 +723,19 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) !void {
 
         // Constants
         .constant => self.airConstant(inst),
+
+        // Type conversions
+        .intcast => self.airIntCast(inst),
+        .trunc => self.airTrunc(inst),
+        .bool_to_int => self.airBoolToInt(inst),
+
+        // Pointer operations
+        .ptr_add => self.airPtrAdd(inst),
+        .ptr_sub => self.airPtrSub(inst),
+
+        // Slice operations
+        .slice_ptr => self.airSlicePtr(inst),
+        .slice_len => self.airSliceLen(inst),
 
         // Blocks
         .block => self.airBlock(inst),
@@ -1062,6 +1080,308 @@ fn airBlock(self: *CodeGen, inst: Air.Inst.Index) !void {
     });
 }
 
+fn airDiv(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const lhs = try self.resolveInst(bin_op.lhs);
+    const rhs = try self.resolveInst(bin_op.rhs);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Determine if signed or unsigned division
+    const lhs_ty = self.typeOf(bin_op.lhs);
+    const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
+
+    // ARM64: SDIV Xd, Xn, Xm (signed) or UDIV Xd, Xn, Xm (unsigned)
+    try self.addInst(.{
+        .tag = if (is_signed) .sdiv else .udiv,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = lhs.register,
+            .rm = rhs.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airRem(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // ARM64 doesn't have a remainder instruction
+    // We need to compute: rem = lhs - (lhs / rhs) * rhs
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const lhs = try self.resolveInst(bin_op.lhs);
+    const rhs = try self.resolveInst(bin_op.rhs);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    const tmp_reg = try self.register_manager.allocReg(inst, .gp);
+    defer self.register_manager.freeReg(tmp_reg);
+
+    const lhs_ty = self.typeOf(bin_op.lhs);
+    const is_signed = lhs_ty.isSignedInt(self.pt.zcu);
+
+    // tmp = lhs / rhs
+    try self.addInst(.{
+        .tag = if (is_signed) .sdiv else .udiv,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = tmp_reg,
+            .rn = lhs.register,
+            .rm = rhs.register,
+        } },
+    });
+
+    // tmp = tmp * rhs
+    try self.addInst(.{
+        .tag = .mul,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = tmp_reg,
+            .rn = tmp_reg,
+            .rm = rhs.register,
+        } },
+    });
+
+    // dst = lhs - tmp
+    try self.addInst(.{
+        .tag = .sub,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = lhs.register,
+            .rm = tmp_reg,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airMod(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // For now, treat mod same as rem
+    // TODO: Implement proper modulo behavior (different from remainder for negative numbers)
+    return self.airRem(inst);
+}
+
+fn airNeg(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
+    const operand = try self.resolveInst(un_op);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ARM64: NEG Xd, Xm (equivalent to SUB Xd, XZR, Xm)
+    try self.addInst(.{
+        .tag = .neg,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rm = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airNot(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(un_op.operand);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ARM64: MVN Xd, Xm (bitwise NOT)
+    try self.addInst(.{
+        .tag = .mvn,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rm = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand);
+    const dest_ty = self.typeOfIndex(inst);
+    const src_ty = self.typeOf(ty_op.operand);
+
+    const zcu = self.pt.zcu;
+    const dest_bits = dest_ty.bitSize(zcu);
+    const src_bits = src_ty.bitSize(zcu);
+
+    if (dest_bits == src_bits) {
+        // No conversion needed, just track
+        try self.inst_tracking.put(self.gpa, inst, .init(operand));
+        return;
+    }
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    if (dest_bits < src_bits) {
+        // Truncation - just use the narrower register alias
+        const narrow_reg = if (dest_bits <= 32) operand.register.to32() else operand.register.to64();
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rm = narrow_reg,
+            } },
+        });
+    } else {
+        // Extension
+        const is_signed = src_ty.isSignedInt(zcu);
+        if (is_signed) {
+            // Sign extension - SXTW (32->64) or SXTB/SXTH for smaller
+            if (src_bits <= 32 and dest_bits == 64) {
+                try self.addInst(.{
+                    .tag = .sxtw,
+                    .ops = .rr,
+                    .data = .{ .rr = .{
+                        .rd = dst_reg.to64(),
+                        .rm = operand.register.to32(),
+                    } },
+                });
+            } else {
+                // TODO: Handle other sign extension cases
+                try self.addInst(.{
+                    .tag = .mov,
+                    .ops = .rr,
+                    .data = .{ .rr = .{
+                        .rd = dst_reg,
+                        .rm = operand.register,
+                    } },
+                });
+            }
+        } else {
+            // Zero extension - MOV with 32-bit register zeros upper 32 bits automatically
+            if (src_bits <= 32 and dest_bits == 64) {
+                try self.addInst(.{
+                    .tag = .mov,
+                    .ops = .rr,
+                    .data = .{ .rr = .{
+                        .rd = dst_reg.to32(), // Writing to W reg zeros upper 32 bits
+                        .rm = operand.register.to32(),
+                    } },
+                });
+            } else {
+                try self.addInst(.{
+                    .tag = .mov,
+                    .ops = .rr,
+                    .data = .{ .rr = .{
+                        .rd = dst_reg,
+                        .rm = operand.register,
+                    } },
+                });
+            }
+        }
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airTrunc(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand);
+    const dest_ty = self.typeOfIndex(inst);
+
+    const zcu = self.pt.zcu;
+    const dest_bits = dest_ty.bitSize(zcu);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Truncate by using narrower register alias
+    const narrow_reg = if (dest_bits <= 32) operand.register.to32() else operand.register.to64();
+    try self.addInst(.{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rm = narrow_reg,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airBoolToInt(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
+    const operand = try self.resolveInst(un_op);
+
+    // Boolean is already 0 or 1, just track it
+    try self.inst_tracking.put(self.gpa, inst, .init(operand));
+}
+
+fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const ptr = try self.resolveInst(bin_op.lhs);
+    const offset = try self.resolveInst(bin_op.rhs);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // ADD Xd, Xn, Xm (pointer + offset)
+    try self.addInst(.{
+        .tag = .add,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = ptr.register,
+            .rm = offset.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airPtrSub(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const ptr = try self.resolveInst(bin_op.lhs);
+    const offset = try self.resolveInst(bin_op.rhs);
+
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // SUB Xd, Xn, Xm (pointer - offset)
+    try self.addInst(.{
+        .tag = .sub,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = ptr.register,
+            .rm = offset.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airSlicePtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const slice = try self.resolveInst(ty_op.operand);
+
+    // Slice is represented as { ptr, len } pair
+    // For register_pair, first register is the pointer
+    const ptr_reg = switch (slice) {
+        .register_pair => |regs| regs[0],
+        else => return error.CodegenFail,
+    };
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = ptr_reg }));
+}
+
+fn airSliceLen(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const slice = try self.resolveInst(ty_op.operand);
+
+    // Slice is represented as { ptr, len } pair
+    // For register_pair, second register is the length
+    const len_reg = switch (slice) {
+        .register_pair => |regs| regs[1],
+        else => return error.CodegenFail,
+    };
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = len_reg }));
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -1077,6 +1397,15 @@ fn resolveInst(self: *CodeGen, inst: Air.Inst.Index) !MCValue {
 
 fn addInst(self: *CodeGen, inst: Mir.Inst) !void {
     try self.mir_instructions.append(self.gpa, inst);
+}
+
+fn typeOf(self: *CodeGen, inst: Air.Inst.Index) Type {
+    const air_tags = self.air.instructions.items(.tag);
+    return self.air.typeOf(inst, air_tags[@intFromEnum(inst)]);
+}
+
+fn typeOfIndex(self: *CodeGen, inst: Air.Inst.Index) Type {
+    return self.air.typeOfIndex(inst);
 }
 
 fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{CodegenFail} {
