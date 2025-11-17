@@ -16578,9 +16578,8 @@ pub const Instruction = packed union {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
                 .ret = .{ .Rn = @enumFromInt(rn) },
             } } };
-        } else {
-            @compileError("Invalid unconditional branch register op: " ++ op);
         }
+        @compileError("Invalid unconditional branch register op: " ++ op);
     }
 
     /// Create conditional branch immediate instruction (B.cond)
@@ -16747,9 +16746,8 @@ pub const Instruction = packed union {
                     .sub = .{ .sf = sf, .sh = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
                 } } };
             }
-        } else {
-            @compileError("Invalid add/subtract immediate op: " ++ op);
         }
+        @compileError("Invalid add/subtract immediate op: " ++ op);
     }
 
     /// Data processing three source (MADD, MSUB, etc)
@@ -16784,23 +16782,21 @@ pub const Instruction = packed union {
         }
     }
 
-    /// Stub: Data processing two source (UDIV, SDIV, LSLV, etc)
-    /// TODO: Implement proper encoding
+    /// Data processing two source (UDIV, SDIV, LSLV, etc)
     pub fn dataProcessingTwoSource(
         sf: Register.GeneralSize,
         opcode: u6,
         rm: u5,
-        imm: u6,
         rn: u5,
         rd: u5,
-    ) error{UnimplementedInstruction}!Instruction {
-        _ = sf;
-        _ = opcode;
-        _ = rm;
-        _ = imm;
-        _ = rn;
-        _ = rd;
-        return error.UnimplementedInstruction;
+    ) Instruction {
+        return .{ .data_processing_register = .{ .data_processing_two_source = .{
+            .sf = sf,
+            .opcode = opcode,
+            .Rm = @enumFromInt(rm),
+            .Rn = @enumFromInt(rn),
+            .Rd = @enumFromInt(rd),
+        } } };
     }
 
     /// Logical shifted register (AND, ORR, EOR, etc with shifts)
@@ -16810,44 +16806,80 @@ pub const Instruction = packed union {
         shift: DataProcessingRegister.Shift.Op,
         imm6: u6,
         rm: u5,
-        imm: u6,
         rn: u5,
         rd: u5,
         n: bool,
     ) Instruction {
-        _ = imm;
-        const op_val = @field(DataProcessingRegister.LogicalShiftedRegister.Opc, @tagName(op));
+        const op_name = @tagName(op);
 
-        return .{ .data_processing_register = .{ .logical_shifted_register = .{
-            .opc = op_val,
-            .sf = sf,
-            .shift = shift,
-            .N = n,
-            .Rm = @enumFromInt(rm),
-            .imm6 = imm6,
-            .Rn = @enumFromInt(rn),
-            .Rd = @enumFromInt(rd),
-        } } };
+        if (std.mem.eql(u8, op_name, "and")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .bic = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .@"and" = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op_name, "orr")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .orn = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .orr = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op_name, "eor")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .eon = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .eor = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op_name, "ands")) {
+            if (n) {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .bics = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .logical_shifted_register = .{
+                    .ands = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .imm6 = imm6, .Rm = @enumFromInt(rm), .shift = shift, .sf = sf },
+                } } };
+            }
+        }
+        @compileError("Invalid logical shifted register operation: " ++ op_name);
     }
 
     /// Move wide immediate (MOVZ, MOVN, MOVK)
     pub fn moveWideImmediate(
-        comptime op: anytype,
+        comptime op: []const u8,
         sf: Register.GeneralSize,
         hw: u2,
         imm16: u16,
         rd: u5,
     ) Instruction {
-        const hw_enum: DataProcessingImmediate.MoveWideImmediate.HW = @enumFromInt(hw);
-        const op_val = @field(DataProcessingImmediate.MoveWideImmediate.Op, @tagName(op));
+        const hw_enum: DataProcessingImmediate.MoveWideImmediate.Hw = @enumFromInt(hw);
 
-        return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
-            .op = op_val,
-            .sf = sf,
-            .hw = hw_enum,
-            .imm16 = imm16,
-            .Rd = @enumFromInt(rd),
-        } } };
+        if (std.mem.eql(u8, op, "movz")) {
+            return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+                .movz = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "movn")) {
+            return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+                .movn = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
+            } } };
+        } else if (std.mem.eql(u8, op, "movk")) {
+            return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+                .movk = .{ .Rd = @enumFromInt(rd), .imm16 = imm16, .hw = hw_enum, .sf = sf },
+            } } };
+        }
+        @compileError("Invalid moveWideImmediate operation: " ++ op);
     }
 
     /// Load/store register immediate (LDR, STR, LDRB, STRB, LDRH, STRH with immediate offset)
@@ -16859,7 +16891,7 @@ pub const Instruction = packed union {
         offset: i12,
     ) Instruction {
         const imm12: u12 = @bitCast(offset);
-        const sf: Register.GeneralSize = if (sz == 0) .w else .x;
+        const sf: Register.GeneralSize = if (sz == 0) .word else .doubleword;
 
         if (std.mem.eql(u8, op, "ldr")) {
             return .{ .load_store = .{ .register_unsigned_immediate = .{

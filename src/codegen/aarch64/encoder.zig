@@ -428,7 +428,7 @@ fn encodeMovz(inst: Mir.Inst) Error!Instruction {
     if (data.imm > 0xFFFF) return error.InvalidImmediate;
     if (data.shift > 48) return error.InvalidImmediate;
     return Instruction.moveWideImmediate(
-        .movz,
+        "movz",
         @enumFromInt(sf),
         @intCast(data.shift / 16),
         @intCast(data.imm),
@@ -442,7 +442,7 @@ fn encodeMovk(inst: Mir.Inst) Error!Instruction {
     if (data.imm > 0xFFFF) return error.InvalidImmediate;
     if (data.shift > 48) return error.InvalidImmediate;
     return Instruction.moveWideImmediate(
-        .movk,
+        "movk",
         @enumFromInt(sf),
         @intCast(data.shift / 16),
         @intCast(data.imm),
