@@ -742,6 +742,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Return
         .ret => self.airRet(inst),
         .ret_load => self.airRetLoad(inst),
+        .ret_ptr => self.airRetPtr(inst),
 
         // Function calls
         .call, .call_always_tail, .call_never_tail, .call_never_inline => self.airCall(inst),
@@ -776,6 +777,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .slice => self.airSlice(inst),
         .slice_ptr => self.airSlicePtr(inst),
         .slice_len => self.airSliceLen(inst),
+        .ptr_slice_ptr_ptr => self.airPtrSlicePtrPtr(inst),
+        .ptr_slice_len_ptr => self.airPtrSliceLenPtr(inst),
 
         // Optional handling
         .is_null => self.airIsNull(inst, true),
@@ -789,8 +792,12 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Error union handling
         .is_err => self.airIsErr(inst, true),
         .is_non_err => self.airIsErr(inst, false),
+        .is_err_ptr => self.airIsErrPtr(inst, true),
+        .is_non_err_ptr => self.airIsErrPtr(inst, false),
         .unwrap_errunion_payload => self.airUnwrapErrUnionPayload(inst),
         .unwrap_errunion_err => self.airUnwrapErrUnionErr(inst),
+        .unwrap_errunion_payload_ptr => self.airUnwrapErrUnionPayloadPtr(inst),
+        .unwrap_errunion_err_ptr => self.airUnwrapErrUnionErrPtr(inst),
         .wrap_errunion_payload => self.airWrapErrUnionPayload(inst),
 
         // Union operations
@@ -804,6 +811,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
 
         // Unreachable/trap
         .unreach, .breakpoint => self.airUnreachable(inst),
+        .trap => self.airTrap(inst),
 
         // Bitcast
         .bitcast => self.airBitcast(inst),
@@ -1259,7 +1267,7 @@ fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
         } else {
             // ADD dst, base, index, LSL #shift
             // For now, do it in two steps: shift then add
-            const temp_reg = try self.register_manager.allocReg(null, .gp);
+            const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
             // LSL temp, index, #shift
             try self.addInst(.{
@@ -1287,7 +1295,7 @@ fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
         }
     } else {
         // Non-power-of-2 size, need to multiply
-        const temp_reg = try self.register_manager.allocReg(null, .gp);
+        const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         // Load elem_size into temp
         try self.addInst(.{
@@ -1299,7 +1307,7 @@ fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
             } },
         });
 
-        const offset_reg = try self.register_manager.allocReg(null, .gp);
+        const offset_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         // MUL offset, index, elem_size
         try self.addInst(.{
@@ -1358,7 +1366,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
         });
     } else {
         // Calculate address first, then load
-        const addr_reg = try self.register_manager.allocReg(null, .gp);
+        const addr_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         // Calculate offset
         if (std.math.isPowerOfTwo(elem_size)) {
@@ -1377,7 +1385,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 });
             } else {
                 // Shift and add
-                const temp_reg = try self.register_manager.allocReg(null, .gp);
+                const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
                 try self.addInst(.{
                     .tag = .lsl,
@@ -1403,7 +1411,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
             }
         } else {
             // Non-power-of-2 size
-            const size_reg = try self.register_manager.allocReg(null, .gp);
+            const size_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
             try self.addInst(.{
                 .tag = .movz,
                 .ops = .ri,
@@ -1413,7 +1421,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 } },
             });
 
-            const offset_reg = try self.register_manager.allocReg(null, .gp);
+            const offset_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
             try self.addInst(.{
                 .tag = .mul,
                 .ops = .rrr,
@@ -1484,7 +1492,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
         });
     } else {
         // Calculate address dynamically
-        const addr_reg = try self.register_manager.allocReg(null, .gp);
+        const addr_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         if (std.math.isPowerOfTwo(elem_size)) {
             const shift = std.math.log2_int(u64, elem_size);
@@ -1500,7 +1508,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                     } },
                 });
             } else {
-                const temp_reg = try self.register_manager.allocReg(null, .gp);
+                const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
                 try self.addInst(.{
                     .tag = .lsl,
@@ -1525,7 +1533,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 self.register_manager.freeReg(temp_reg);
             }
         } else {
-            const size_reg = try self.register_manager.allocReg(null, .gp);
+            const size_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
             try self.addInst(.{
                 .tag = .movz,
                 .ops = .ri,
@@ -1535,7 +1543,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 } },
             });
 
-            const offset_reg = try self.register_manager.allocReg(null, .gp);
+            const offset_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
             try self.addInst(.{
                 .tag = .mul,
                 .ops = .rrr,
@@ -1600,7 +1608,7 @@ fn airIsNull(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !void
         });
     } else {
         // Tag-based optional: load null tag from offset and compare with 0
-        const tag_reg = try self.register_manager.allocReg(null, .gp);
+        const tag_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         // Load null tag: LDRB tag, [operand, #opt_child_abi_size]
         try self.addInst(.{
@@ -1657,7 +1665,7 @@ fn airIsNullPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !v
     // Load from pointer and compare
     if (opt_repr_is_pl) {
         // Load pointer value and compare with 0
-        const val_reg = try self.register_manager.allocReg(null, .gp);
+        const val_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         try self.addInst(.{
             .tag = .ldr,
@@ -1680,7 +1688,7 @@ fn airIsNullPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !v
         self.register_manager.freeReg(val_reg);
     } else {
         // Load null tag from [ptr + opt_child_abi_size]
-        const tag_reg = try self.register_manager.allocReg(null, .gp);
+        const tag_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
         try self.addInst(.{
             .tag = .ldrb,
@@ -1821,7 +1829,7 @@ fn airIsErr(self: *CodeGen, inst: Air.Inst.Index, comptime is_err: bool) !void {
     const operand = try self.resolveInst(un_op.toIndex().?);
 
     // Load error value from union
-    const err_reg = try self.register_manager.allocReg(null, .gp);
+    const err_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
 
     // Error is u16, use LDRH
     try self.addInst(.{
@@ -1918,6 +1926,234 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
     // with error = 0 and payload = value
     // This typically requires stack allocation
     return self.fail("TODO: wrap_errunion_payload requires stack allocation and struct creation", .{});
+}
+
+fn airIsErrPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_err: bool) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const ptr_ty = self.typeOf(ty_op.operand);
+    const err_union_ty = ptr_ty.childType(self.pt.zcu);
+    const payload_ty = err_union_ty.errorUnionPayload(self.pt.zcu);
+    const zcu = self.pt.zcu;
+
+    const err_off: i32 = @intCast(codegen.errUnionErrorOffset(payload_ty, zcu));
+
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Load error value from memory through pointer
+    const err_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Error is u16, use LDRH
+    try self.addInst(.{
+        .tag = .ldrh,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = err_reg,
+            .mem = Memory.simple(operand.register, err_off),
+        } },
+    });
+
+    // Compare with 0
+    try self.addInst(.{
+        .tag = .cmp,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = err_reg,
+            .rn = .xzr,
+        } },
+    });
+
+    self.register_manager.freeReg(err_reg);
+
+    // Materialize result
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    const cond: Condition = if (is_err) .ne else .eq;
+
+    try self.addInst(.{
+        .tag = .cset,
+        .ops = .rrc,
+        .data = .{ .rrc = .{
+            .rd = dst_reg,
+            .rn = .xzr,
+            .cond = cond,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airUnwrapErrUnionPayloadPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const ptr_ty = self.typeOf(ty_op.operand);
+    const err_union_ty = ptr_ty.childType(self.pt.zcu);
+    const payload_ty = err_union_ty.errorUnionPayload(self.pt.zcu);
+    const zcu = self.pt.zcu;
+
+    const payload_off: i32 = @intCast(codegen.errUnionPayloadOffset(payload_ty, zcu));
+
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Calculate pointer to payload
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    if (payload_off == 0) {
+        // Payload is at offset 0, just return the pointer
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    } else {
+        // Add offset to pointer
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+                .imm = @intCast(payload_off),
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airUnwrapErrUnionErrPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const ptr_ty = self.typeOf(ty_op.operand);
+    const err_union_ty = ptr_ty.childType(self.pt.zcu);
+    const payload_ty = err_union_ty.errorUnionPayload(self.pt.zcu);
+    const zcu = self.pt.zcu;
+
+    const err_off: i32 = @intCast(codegen.errUnionErrorOffset(payload_ty, zcu));
+
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Calculate pointer to error
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    if (err_off == 0) {
+        // Error is at offset 0, just return the pointer
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    } else {
+        // Add offset to pointer
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+                .imm = @intCast(err_off),
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airPtrSlicePtrPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Get pointer to the ptr field (first field at offset 0)
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Slice ptr is at offset 0, so just return the pointer
+    try self.addInst(.{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airPtrSliceLenPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Get pointer to the len field (second field at offset 8)
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Add 8 to get to len field
+    try self.addInst(.{
+        .tag = .add,
+        .ops = .rri,
+        .data = .{ .rri = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+            .imm = 8,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airRetPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // Load value from pointer and return it
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const val_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // Load the value
+    try self.addInst(.{
+        .tag = .ldr,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = val_reg,
+            .mem = Memory.simple(operand.register, 0),
+        } },
+    });
+
+    // Move to return register (X0 or V0)
+    const ret_reg: Register = if (is_float) .v0 else .x0;
+    if (val_reg.id() != ret_reg.id()) {
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = ret_reg,
+                .rn = val_reg,
+            } },
+        });
+    }
+
+    // Return
+    try self.addInst(.{
+        .tag = .ret,
+        .ops = .none,
+        .data = .{ .none = {} },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = ret_reg }));
+}
+
+fn airTrap(self: *CodeGen, inst: Air.Inst.Index) !void {
+    _ = inst;
+    // Generate a trap/abort instruction - use UDF (undefined instruction)
+    // which will cause an exception
+    try self.addInst(.{
+        .tag = .brk,
+        .ops = .none,
+        .data = .{ .none = {} },
+    });
 }
 
 fn airUnaryFloatOp(self: *CodeGen, inst: Air.Inst.Index) !void {
@@ -2173,7 +2409,7 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
             try self.addInst(.{
                 .tag = .blr,
                 .ops = .r,
-                .data = .{ .r = .{ .rn = reg } },
+                .data = .{ .r = reg },
             });
         },
         .memory => {
@@ -2920,95 +3156,24 @@ fn airGetUnionTag(self: *CodeGen, inst: Air.Inst.Index) !void {
     // The tag is at the union pointer + tag offset
     const tag_off: i32 = @intCast(layout.tag_align.forward(layout.payload_size));
 
-    if (tag_off == 0) {
-        // Tag is at offset 0, just load it
-        try self.addInst(.{
-            .tag = if (tag_size <= 1) .ldrb else if (tag_size <= 2) .ldrh else .ldr,
-            .ops = .rm,
-            .data = .{ .rm = .{
-                .rd = dst_reg,
-                .mem = .{
-                    .base = .{ .reg = operand.register },
-                    .mod = .{ .immediate = 0 },
-                },
-            } },
-        });
-    } else {
-        // Tag is at non-zero offset
-        try self.addInst(.{
-            .tag = if (tag_size <= 1) .ldrb else if (tag_size <= 2) .ldrh else .ldr,
-            .ops = .rm,
-            .data = .{ .rm = .{
-                .rd = dst_reg,
-                .mem = .{
-                    .base = .{ .reg = operand.register },
-                    .mod = .{ .immediate = tag_off },
-                },
-            } },
-        });
-    }
+    // Load the tag using appropriate instruction based on size
+    try self.addInst(.{
+        .tag = if (tag_size <= 1) .ldrb else if (tag_size <= 2) .ldrh else .ldr,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = dst_reg,
+            .mem = Memory.simple(operand.register, tag_off),
+        } },
+    });
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
 
 fn airSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
-    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
-    const bin = self.air.extraData(Air.Bin, ty_pl.payload).data;
-    const ptr = try self.resolveInst(bin.lhs.toIndex().?);
-    const len = try self.resolveInst(bin.rhs.toIndex().?);
-
-    // A slice is a struct with two fields: ptr and len
-    // We need to create this on the stack and return a pointer to it
-
-    const slice_ty = self.typeOfIndex(inst);
-    const zcu = self.pt.zcu;
-    const slice_size = slice_ty.abiSize(zcu);
-    const slice_align = slice_ty.abiAlignment(zcu);
-
-    // Allocate stack space for the slice
-    const stack_offset = try self.allocStackSpace(@intCast(slice_size), slice_align);
-
-    const dst_reg = try self.register_manager.allocReg(inst, .gp);
-
-    // Get stack pointer into dst_reg
-    // SUB Xd, X29, #offset
-    try self.addInst(.{
-        .tag = .sub,
-        .ops = .rri,
-        .data = .{ .rri = .{
-            .rd = dst_reg,
-            .rn = .x29, // Frame pointer
-            .imm = @intCast(stack_offset),
-        } },
-    });
-
-    // Store ptr field (first 8 bytes)
-    try self.addInst(.{
-        .tag = .str,
-        .ops = .mr,
-        .data = .{ .mr = .{
-            .mem = .{
-                .base = .{ .reg = dst_reg },
-                .mod = .{ .immediate = 0 },
-            },
-            .rs = ptr.register,
-        } },
-    });
-
-    // Store len field (second 8 bytes)
-    try self.addInst(.{
-        .tag = .str,
-        .ops = .mr,
-        .data = .{ .mr = .{
-            .mem = .{
-                .base = .{ .reg = dst_reg },
-                .mod = .{ .immediate = 8 },
-            },
-            .rs = len.register,
-        } },
-    });
-
-    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    // Creating a slice requires allocating stack space for the {ptr, len} struct
+    // This requires proper stack frame management which is not fully implemented yet
+    _ = inst;
+    return self.fail("TODO: airSlice requires stack allocation and frame management", .{});
 }
 
 fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
