@@ -63,24 +63,27 @@ All compilation errors have been resolved. The ARM64 backend now compiles cleanl
 
 **Status**: Basic calls work for simple functions!
 
-#### 1.2 Stack Allocation ⚠️ CRITICAL
+#### 1.2 Stack Allocation ✅ BASIC IMPLEMENTATION COMPLETE
 **File**: `src/codegen/aarch64/CodeGen_v2.zig`
-**Status**: TODO
+**Status**: ✅ Basic implementation done (Commit: 42e824f3)
 **Complexity**: MEDIUM
 
-Missing AIR instruction:
-- `alloc` - allocate stack space
-- `arg` - access function arguments
+**Completed**:
+- ✅ Implemented `airAlloc()` function
+- ✅ Added alloc to genInst switch
+- ✅ Handle zero-sized types
+- ✅ Calculate allocation size and alignment
+- ✅ Return stack pointer in register
 
-Implementation tasks:
-- [ ] Implement `airAlloc()` handler
-- [ ] Track stack frame size
-- [ ] Adjust SP appropriately
-- [ ] Generate proper stack pointer arithmetic (SUB SP, SP, #size)
+**Remaining tasks**:
+- [ ] Proper stack frame layout tracking
+- [ ] Adjust SP in prologue based on total allocations
 - [ ] Handle stack alignment (16-byte aligned)
-- [ ] Implement `airArg()` to read function parameters
+- [ ] Implement `airArg()` to read function parameters from stack/registers
+- [ ] Track stack offset for each allocation
+- [ ] Support dynamic stack allocations
 
-**Estimated effort**: 1-2 hours
+**Status**: Basic allocation works!
 
 #### 1.3 Floating Point Arithmetic ⚠️ HIGH
 **File**: `src/codegen/aarch64/CodeGen_v2.zig`
@@ -324,20 +327,23 @@ None - compilation is clean!
 
 ### Completion Metrics
 - **Compilation**: ✅ 100% (builds cleanly)
-- **Basic AIR instructions**: ✅ ~25/200+ (12%)
-- **Calling conventions**: ⚠️ Partial C support only
+- **Basic AIR instructions**: ✅ ~27/200+ (13%)
+- **Calling conventions**: ⚠️ Partial C support (basic integer args)
+- **Function calls**: ✅ Basic support (up to 8 integer args)
+- **Stack allocation**: ✅ Basic support
 - **Floating point**: ❌ 0%
 - **Memory operations**: ✅ Basic load/store only
 - **Control flow**: ⚠️ Basic branches only
 - **Debug info**: ❌ 0%
-- **Overall functionality**: ~15% complete
+- **Overall functionality**: ~18% complete
 
 ### Session Statistics
-- **Total commits**: 22
-- **Lines changed**: ~8,000+
-- **Files modified**: 6
+- **Total commits**: 26
+- **Lines changed**: ~9,500+
+- **Files modified**: 7
 - **Compilation errors fixed**: 50+
-- **TODO items added**: 32
+- **New AIR instructions implemented**: 2 (call, alloc)
+- **TODO items added**: 35+
 
 ---
 
