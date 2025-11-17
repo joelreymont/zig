@@ -742,9 +742,37 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Memory allocation
         .alloc => self.airAlloc(inst),
 
+        // Struct and array access
+        .struct_field_ptr => self.airStructFieldPtr(inst),
+        .struct_field_ptr_index_0,
+        .struct_field_ptr_index_1,
+        .struct_field_ptr_index_2,
+        .struct_field_ptr_index_3,
+        => self.airStructFieldPtrIndex(inst),
+        .struct_field_val => self.airStructFieldVal(inst),
+        .ptr_elem_ptr => self.airPtrElemPtr(inst),
+        .ptr_elem_val => self.airPtrElemVal(inst),
+        .array_elem_val => self.airArrayElemVal(inst),
+
         // Slice operations
         .slice_ptr => self.airSlicePtr(inst),
         .slice_len => self.airSliceLen(inst),
+
+        // Optional handling
+        .is_null => self.airIsNull(inst, true),
+        .is_non_null => self.airIsNull(inst, false),
+        .is_null_ptr => self.airIsNullPtr(inst, true),
+        .is_non_null_ptr => self.airIsNullPtr(inst, false),
+        .optional_payload => self.airOptionalPayload(inst),
+        .optional_payload_ptr => self.airOptionalPayloadPtr(inst),
+        .wrap_optional => self.airWrapOptional(inst),
+
+        // Error union handling
+        .is_err => self.airIsErr(inst, true),
+        .is_non_err => self.airIsErr(inst, false),
+        .unwrap_errunion_payload => self.airUnwrapErrUnionPayload(inst),
+        .unwrap_errunion_err => self.airUnwrapErrUnionErr(inst),
+        .wrap_errunion_payload => self.airWrapErrUnionPayload(inst),
 
         // Blocks
         .block => self.airBlock(inst),
@@ -1034,6 +1062,831 @@ fn airStore(self: *CodeGen, inst: Air.Inst.Index) !void {
             .rs = val.register,
         } },
     });
+}
+
+fn airStructFieldPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const struct_field = self.air.extraData(Air.StructField, ty_pl.payload).data;
+
+    const ptr_field_ty = ty_pl.ty.toType();
+    const ptr_agg_ty = self.typeOf(struct_field.struct_operand);
+    const field_offset = codegen.fieldOffset(ptr_agg_ty, ptr_field_ty, struct_field.field_index, self.pt.zcu);
+
+    const base_ptr = try self.resolveInst(struct_field.struct_operand.toIndex().?);
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    if (field_offset == 0) {
+        // Field is at offset 0, just copy the pointer
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = base_ptr.register,
+            } },
+        });
+    } else {
+        // ADD dst, base, #offset
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = dst_reg,
+                .rn = base_ptr.register,
+                .imm = field_offset,
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airStructFieldPtrIndex(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const tag = self.air.instructions.items(.tag)[@intFromEnum(inst)];
+
+    const field_index: u32 = switch (tag) {
+        .struct_field_ptr_index_0 => 0,
+        .struct_field_ptr_index_1 => 1,
+        .struct_field_ptr_index_2 => 2,
+        .struct_field_ptr_index_3 => 3,
+        else => unreachable,
+    };
+
+    const ptr_field_ty = ty_op.ty.toType();
+    const ptr_agg_ty = self.typeOf(ty_op.operand);
+    const field_offset = codegen.fieldOffset(ptr_agg_ty, ptr_field_ty, field_index, self.pt.zcu);
+
+    const base_ptr = try self.resolveInst(ty_op.operand.toIndex().?);
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    if (field_offset == 0) {
+        // Field is at offset 0, just copy the pointer
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = base_ptr.register,
+            } },
+        });
+    } else {
+        // ADD dst, base, #offset
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = dst_reg,
+                .rn = base_ptr.register,
+                .imm = field_offset,
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airStructFieldVal(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const struct_field = self.air.extraData(Air.StructField, ty_pl.payload).data;
+
+    const field_ty = ty_pl.ty.toType();
+    const agg_ty = self.typeOf(struct_field.struct_operand);
+    const zcu = self.pt.zcu;
+
+    // Calculate field offset
+    const field_offset: i32 = switch (agg_ty.containerLayout(zcu)) {
+        .auto, .@"extern" => @intCast(agg_ty.structFieldOffset(struct_field.field_index, zcu)),
+        .@"packed" => return self.fail("TODO: packed struct field access not yet implemented", .{}),
+    };
+
+    // Check if field has runtime bits
+    if (!field_ty.hasRuntimeBitsIgnoreComptime(zcu)) {
+        // Zero-sized field, return undefined/zero
+        const dst_reg = try self.register_manager.allocReg(inst, .gp);
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = dst_reg,
+                .imm = 0,
+            } },
+        });
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+        return;
+    }
+
+    const struct_val = try self.resolveInst(struct_field.struct_operand.toIndex().?);
+
+    // Determine register class based on field type
+    const is_float = field_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // Load field value from struct at offset
+    // LDR dst, [struct_ptr, #offset]
+    try self.addInst(.{
+        .tag = .ldr,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = dst_reg,
+            .mem = Memory.simple(struct_val.register, field_offset),
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const bin_op = self.air.extraData(Air.Bin, ty_pl.payload).data;
+
+    const ptr_ty = self.typeOf(bin_op.lhs);
+    const elem_ty = ptr_ty.childType(self.pt.zcu);
+    const elem_size = elem_ty.abiSize(self.pt.zcu);
+
+    const base_ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const index = try self.resolveInst(bin_op.rhs.toIndex().?);
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Calculate offset: index * elem_size
+    // For power-of-2 sizes, we can use LSL (left shift)
+    if (std.math.isPowerOfTwo(elem_size)) {
+        const shift = std.math.log2_int(u64, elem_size);
+
+        if (shift == 0) {
+            // Element size is 1, just add index to base
+            try self.addInst(.{
+                .tag = .add,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = dst_reg,
+                    .rn = base_ptr.register,
+                    .rm = index.register,
+                } },
+            });
+        } else {
+            // ADD dst, base, index, LSL #shift
+            // For now, do it in two steps: shift then add
+            const temp_reg = try self.register_manager.allocReg(null, .gp);
+
+            // LSL temp, index, #shift
+            try self.addInst(.{
+                .tag = .lsl,
+                .ops = .rri,
+                .data = .{ .rri = .{
+                    .rd = temp_reg,
+                    .rn = index.register,
+                    .imm = shift,
+                } },
+            });
+
+            // ADD dst, base, temp
+            try self.addInst(.{
+                .tag = .add,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = dst_reg,
+                    .rn = base_ptr.register,
+                    .rm = temp_reg,
+                } },
+            });
+
+            self.register_manager.freeReg(temp_reg);
+        }
+    } else {
+        // Non-power-of-2 size, need to multiply
+        const temp_reg = try self.register_manager.allocReg(null, .gp);
+
+        // Load elem_size into temp
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = temp_reg,
+                .imm = @intCast(elem_size & 0xFFFF),
+            } },
+        });
+
+        const offset_reg = try self.register_manager.allocReg(null, .gp);
+
+        // MUL offset, index, elem_size
+        try self.addInst(.{
+            .tag = .mul,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = offset_reg,
+                .rn = index.register,
+                .rm = temp_reg,
+            } },
+        });
+
+        // ADD dst, base, offset
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = dst_reg,
+                .rn = base_ptr.register,
+                .rm = offset_reg,
+            } },
+        });
+
+        self.register_manager.freeReg(temp_reg);
+        self.register_manager.freeReg(offset_reg);
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+
+    const ptr_ty = self.typeOf(bin_op.lhs);
+    const elem_ty = ptr_ty.childType(self.pt.zcu);
+    const elem_size = elem_ty.abiSize(self.pt.zcu);
+
+    const base_ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const index = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    // Determine register class based on element type
+    const is_float = elem_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // For simple cases with small constant index, we can use immediate offset
+    if (index == .immediate and index.immediate * elem_size < 32768) {
+        const offset: i32 = @intCast(index.immediate * elem_size);
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(base_ptr.register, offset),
+            } },
+        });
+    } else {
+        // Calculate address first, then load
+        const addr_reg = try self.register_manager.allocReg(null, .gp);
+
+        // Calculate offset
+        if (std.math.isPowerOfTwo(elem_size)) {
+            const shift = std.math.log2_int(u64, elem_size);
+
+            if (shift == 0) {
+                // ADD addr, base, index
+                try self.addInst(.{
+                    .tag = .add,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = addr_reg,
+                        .rn = base_ptr.register,
+                        .rm = index.register,
+                    } },
+                });
+            } else {
+                // Shift and add
+                const temp_reg = try self.register_manager.allocReg(null, .gp);
+
+                try self.addInst(.{
+                    .tag = .lsl,
+                    .ops = .rri,
+                    .data = .{ .rri = .{
+                        .rd = temp_reg,
+                        .rn = index.register,
+                        .imm = shift,
+                    } },
+                });
+
+                try self.addInst(.{
+                    .tag = .add,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = addr_reg,
+                        .rn = base_ptr.register,
+                        .rm = temp_reg,
+                    } },
+                });
+
+                self.register_manager.freeReg(temp_reg);
+            }
+        } else {
+            // Non-power-of-2 size
+            const size_reg = try self.register_manager.allocReg(null, .gp);
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{
+                    .rd = size_reg,
+                    .imm = @intCast(elem_size & 0xFFFF),
+                } },
+            });
+
+            const offset_reg = try self.register_manager.allocReg(null, .gp);
+            try self.addInst(.{
+                .tag = .mul,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = offset_reg,
+                    .rn = index.register,
+                    .rm = size_reg,
+                } },
+            });
+
+            try self.addInst(.{
+                .tag = .add,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = addr_reg,
+                    .rn = base_ptr.register,
+                    .rm = offset_reg,
+                } },
+            });
+
+            self.register_manager.freeReg(size_reg);
+            self.register_manager.freeReg(offset_reg);
+        }
+
+        // Load from calculated address
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(addr_reg, 0),
+            } },
+        });
+
+        self.register_manager.freeReg(addr_reg);
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+
+    const array_ty = self.typeOf(bin_op.lhs);
+    const elem_ty = array_ty.childType(self.pt.zcu);
+    const elem_size = elem_ty.abiSize(self.pt.zcu);
+
+    const array_val = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const index = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    // Determine register class based on element type
+    const is_float = elem_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // For array by-value, the array is typically on the stack
+    // array_val should be a pointer to the array
+    // Calculate offset and load
+    if (index == .immediate and index.immediate * elem_size < 32768) {
+        const offset: i32 = @intCast(index.immediate * elem_size);
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(array_val.register, offset),
+            } },
+        });
+    } else {
+        // Calculate address dynamically
+        const addr_reg = try self.register_manager.allocReg(null, .gp);
+
+        if (std.math.isPowerOfTwo(elem_size)) {
+            const shift = std.math.log2_int(u64, elem_size);
+
+            if (shift == 0) {
+                try self.addInst(.{
+                    .tag = .add,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = addr_reg,
+                        .rn = array_val.register,
+                        .rm = index.register,
+                    } },
+                });
+            } else {
+                const temp_reg = try self.register_manager.allocReg(null, .gp);
+
+                try self.addInst(.{
+                    .tag = .lsl,
+                    .ops = .rri,
+                    .data = .{ .rri = .{
+                        .rd = temp_reg,
+                        .rn = index.register,
+                        .imm = shift,
+                    } },
+                });
+
+                try self.addInst(.{
+                    .tag = .add,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = addr_reg,
+                        .rn = array_val.register,
+                        .rm = temp_reg,
+                    } },
+                });
+
+                self.register_manager.freeReg(temp_reg);
+            }
+        } else {
+            const size_reg = try self.register_manager.allocReg(null, .gp);
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{
+                    .rd = size_reg,
+                    .imm = @intCast(elem_size & 0xFFFF),
+                } },
+            });
+
+            const offset_reg = try self.register_manager.allocReg(null, .gp);
+            try self.addInst(.{
+                .tag = .mul,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = offset_reg,
+                    .rn = index.register,
+                    .rm = size_reg,
+                } },
+            });
+
+            try self.addInst(.{
+                .tag = .add,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = addr_reg,
+                    .rn = array_val.register,
+                    .rm = offset_reg,
+                } },
+            });
+
+            self.register_manager.freeReg(size_reg);
+            self.register_manager.freeReg(offset_reg);
+        }
+
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(addr_reg, 0),
+            } },
+        });
+
+        self.register_manager.freeReg(addr_reg);
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airIsNull(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
+    const opt_ty = self.typeOf(un_op);
+    const zcu = self.pt.zcu;
+
+    const opt_repr_is_pl = opt_ty.optionalReprIsPayload(zcu);
+    const opt_child_ty = opt_ty.optionalChild(zcu);
+    const opt_child_abi_size: i32 = @intCast(opt_child_ty.abiSize(zcu));
+
+    const operand = try self.resolveInst(un_op.toIndex().?);
+
+    // Compare null tag (or payload for pointer-based optionals) with 0
+    if (opt_repr_is_pl) {
+        // Pointer-based optional: null is represented as 0
+        // CMP operand, #0
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = operand.register,
+                .rn = .xzr, // Compare with zero register
+            } },
+        });
+    } else {
+        // Tag-based optional: load null tag from offset and compare with 0
+        const tag_reg = try self.register_manager.allocReg(null, .gp);
+
+        // Load null tag: LDRB tag, [operand, #opt_child_abi_size]
+        try self.addInst(.{
+            .tag = .ldrb,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = tag_reg,
+                .mem = Memory.simple(operand.register, opt_child_abi_size),
+            } },
+        });
+
+        // CMP tag, #0
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = tag_reg,
+                .rn = .xzr,
+            } },
+        });
+
+        self.register_manager.freeReg(tag_reg);
+    }
+
+    // Materialize result to register using CSET
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    const cond: Condition = if (is_null) .eq else .ne;
+
+    try self.addInst(.{
+        .tag = .cset,
+        .ops = .rrc,
+        .data = .{ .rrc = .{
+            .rd = dst_reg,
+            .rn = .xzr,
+            .cond = cond,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airIsNullPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
+    const ptr_ty = self.typeOf(un_op);
+    const opt_ty = ptr_ty.childType(self.pt.zcu);
+    const zcu = self.pt.zcu;
+
+    const opt_repr_is_pl = opt_ty.optionalReprIsPayload(zcu);
+    const opt_child_ty = opt_ty.optionalChild(zcu);
+    const opt_child_abi_size: i32 = @intCast(opt_child_ty.abiSize(zcu));
+
+    const ptr = try self.resolveInst(un_op.toIndex().?);
+
+    // Load from pointer and compare
+    if (opt_repr_is_pl) {
+        // Load pointer value and compare with 0
+        const val_reg = try self.register_manager.allocReg(null, .gp);
+
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = val_reg,
+                .mem = Memory.simple(ptr.register, 0),
+            } },
+        });
+
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = val_reg,
+                .rn = .xzr,
+            } },
+        });
+
+        self.register_manager.freeReg(val_reg);
+    } else {
+        // Load null tag from [ptr + opt_child_abi_size]
+        const tag_reg = try self.register_manager.allocReg(null, .gp);
+
+        try self.addInst(.{
+            .tag = .ldrb,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = tag_reg,
+                .mem = Memory.simple(ptr.register, opt_child_abi_size),
+            } },
+        });
+
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = tag_reg,
+                .rn = .xzr,
+            } },
+        });
+
+        self.register_manager.freeReg(tag_reg);
+    }
+
+    // Materialize result
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    const cond: Condition = if (is_null) .eq else .ne;
+
+    try self.addInst(.{
+        .tag = .cset,
+        .ops = .rrc,
+        .data = .{ .rrc = .{
+            .rd = dst_reg,
+            .rn = .xzr,
+            .cond = cond,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airOptionalPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const opt_ty = self.typeOf(ty_op.operand);
+    const payload_ty = ty_op.ty.toType();
+
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // For payload-based optionals (pointers), the payload is the value itself
+    // For tag-based optionals, the payload is at offset 0
+    // In both cases, just return the operand (or load from it)
+    const is_float = payload_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    const zcu = self.pt.zcu;
+    const opt_repr_is_pl = opt_ty.optionalReprIsPayload(zcu);
+
+    if (opt_repr_is_pl) {
+        // Payload is the value itself, just move it
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = operand.register,
+            } },
+        });
+    } else {
+        // Payload is at offset 0, load it
+        try self.addInst(.{
+            .tag = .ldr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(operand.register, 0),
+            } },
+        });
+    }
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airOptionalPayloadPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    // For pointer to optional, payload pointer is the same as the optional pointer
+    // (since payload is at offset 0)
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    try self.addInst(.{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = operand.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airWrapOptional(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const opt_ty = ty_op.ty.toType();
+    const payload = try self.resolveInst(ty_op.operand.toIndex().?);
+    const zcu = self.pt.zcu;
+
+    const opt_repr_is_pl = opt_ty.optionalReprIsPayload(zcu);
+
+    if (opt_repr_is_pl) {
+        // For pointer-based optionals, the payload is the optional value
+        const dst_reg = try self.register_manager.allocReg(inst, .gp);
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = payload.register,
+            } },
+        });
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    } else {
+        // For tag-based optionals, need to store payload + set tag to 1
+        // This typically requires stack allocation
+        // For now, simplified: just return payload and mark as TODO
+        return self.fail("TODO: wrap_optional for tag-based optionals requires stack allocation", .{});
+    }
+}
+
+fn airIsErr(self: *CodeGen, inst: Air.Inst.Index, comptime is_err: bool) !void {
+    const un_op = self.air.instructions.items(.data)[@intFromEnum(inst)].un_op;
+    const err_union_ty = self.typeOf(un_op);
+    const payload_ty = err_union_ty.errorUnionPayload(self.pt.zcu);
+    const zcu = self.pt.zcu;
+
+    const err_off: i32 = @intCast(codegen.errUnionErrorOffset(payload_ty, zcu));
+
+    const operand = try self.resolveInst(un_op.toIndex().?);
+
+    // Load error value from union
+    const err_reg = try self.register_manager.allocReg(null, .gp);
+
+    // Error is u16, use LDRH
+    try self.addInst(.{
+        .tag = .ldrh,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = err_reg,
+            .mem = Memory.simple(operand.register, err_off),
+        } },
+    });
+
+    // Compare with 0
+    try self.addInst(.{
+        .tag = .cmp,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = err_reg,
+            .rn = .xzr,
+        } },
+    });
+
+    self.register_manager.freeReg(err_reg);
+
+    // Materialize result
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    const cond: Condition = if (is_err) .ne else .eq;
+
+    try self.addInst(.{
+        .tag = .cset,
+        .ops = .rrc,
+        .data = .{ .rrc = .{
+            .rd = dst_reg,
+            .rn = .xzr,
+            .cond = cond,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airUnwrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const err_union_ty = self.typeOf(ty_op.operand);
+    const payload_ty = ty_op.ty.toType();
+    const zcu = self.pt.zcu;
+
+    const payload_off: i32 = @intCast(codegen.errUnionPayloadOffset(payload_ty, zcu));
+
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+
+    const is_float = payload_ty.isRuntimeFloat();
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // Load payload from union
+    try self.addInst(.{
+        .tag = .ldr,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = dst_reg,
+            .mem = Memory.simple(operand.register, payload_off),
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airUnwrapErrUnionErr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const err_union_ty = self.typeOf(ty_op.operand);
+    const payload_ty = err_union_ty.errorUnionPayload(self.pt.zcu);
+    const zcu = self.pt.zcu;
+
+    const err_off: i32 = @intCast(codegen.errUnionErrorOffset(payload_ty, zcu));
+
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Load error value (u16)
+    try self.addInst(.{
+        .tag = .ldrh,
+        .ops = .rm,
+        .data = .{ .rm = .{
+            .rd = dst_reg,
+            .mem = Memory.simple(operand.register, err_off),
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // Wrapping a payload in an error union requires creating the struct
+    // with error = 0 and payload = value
+    // This typically requires stack allocation
+    return self.fail("TODO: wrap_errunion_payload requires stack allocation and struct creation", .{});
 }
 
 fn airCmp(self: *CodeGen, inst: Air.Inst.Index) !void {
