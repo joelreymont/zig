@@ -16752,8 +16752,7 @@ pub const Instruction = packed union {
         }
     }
 
-    /// Stub: Data processing three source (MADD, MSUB, etc)
-    /// TODO: Implement proper encoding
+    /// Data processing three source (MADD, MSUB, etc)
     pub fn dataProcessingThreeSource(
         sf: Register.GeneralSize,
         opcode: u3,
@@ -16761,14 +16760,28 @@ pub const Instruction = packed union {
         ra: u5,
         rn: u5,
         rd: u5,
-    ) error{UnimplementedInstruction}!Instruction {
-        _ = sf;
-        _ = opcode;
-        _ = rm;
-        _ = ra;
-        _ = rn;
-        _ = rd;
-        return error.UnimplementedInstruction;
+    ) Instruction {
+        // Determine which variant based on opcode
+        // opcode bits: op54 (bit 1), o0 (bit 0)
+        const o0: u1 = @truncate(opcode & 1);
+        const op54: u2 = @truncate((opcode >> 1) & 0b11);
+
+        if (op54 == 0b00) {
+            if (o0 == 0) {
+                return .{ .data_processing_register = .{ .data_processing_three_source = .{
+                    .madd = .{ .sf = sf, .Rm = @enumFromInt(rm), .Ra = @enumFromInt(ra), .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            } else {
+                return .{ .data_processing_register = .{ .data_processing_three_source = .{
+                    .msub = .{ .sf = sf, .Rm = @enumFromInt(rm), .Ra = @enumFromInt(ra), .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            }
+        } else {
+            // For other opcodes, default to MADD structure
+            return .{ .data_processing_register = .{ .data_processing_three_source = .{
+                .madd = .{ .sf = sf, .Rm = @enumFromInt(rm), .Ra = @enumFromInt(ra), .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+            } } };
+        }
     }
 
     /// Stub: Data processing two source (UDIV, SDIV, LSLV, etc)
@@ -16790,8 +16803,7 @@ pub const Instruction = packed union {
         return error.UnimplementedInstruction;
     }
 
-    /// Stub: Logical shifted register (AND, ORR, EOR, etc with shifts)
-    /// TODO: Implement proper encoding
+    /// Logical shifted register (AND, ORR, EOR, etc with shifts)
     pub fn logicalShiftedRegister(
         comptime op: anytype,
         sf: Register.GeneralSize,
@@ -16802,51 +16814,80 @@ pub const Instruction = packed union {
         rn: u5,
         rd: u5,
         n: bool,
-    ) error{UnimplementedInstruction}!Instruction {
-        _ = op;
-        _ = sf;
-        _ = shift;
-        _ = imm6;
-        _ = rm;
+    ) Instruction {
         _ = imm;
-        _ = rn;
-        _ = rd;
-        _ = n;
-        return error.UnimplementedInstruction;
+        const op_val = @field(DataProcessingRegister.LogicalShiftedRegister.Opc, @tagName(op));
+
+        return .{ .data_processing_register = .{ .logical_shifted_register = .{
+            .opc = op_val,
+            .sf = sf,
+            .shift = shift,
+            .N = n,
+            .Rm = @enumFromInt(rm),
+            .imm6 = imm6,
+            .Rn = @enumFromInt(rn),
+            .Rd = @enumFromInt(rd),
+        } } };
     }
 
-    /// Stub: Move wide immediate (MOVZ, MOVN, MOVK)
-    /// TODO: Implement proper encoding
+    /// Move wide immediate (MOVZ, MOVN, MOVK)
     pub fn moveWideImmediate(
         comptime op: anytype,
         sf: Register.GeneralSize,
         hw: u2,
         imm16: u16,
         rd: u5,
-    ) error{UnimplementedInstruction}!Instruction {
-        _ = op;
-        _ = sf;
-        _ = hw;
-        _ = imm16;
-        _ = rd;
-        return error.UnimplementedInstruction;
+    ) Instruction {
+        const hw_enum: DataProcessingImmediate.MoveWideImmediate.HW = @enumFromInt(hw);
+        const op_val = @field(DataProcessingImmediate.MoveWideImmediate.Op, @tagName(op));
+
+        return .{ .data_processing_immediate = .{ .move_wide_immediate = .{
+            .op = op_val,
+            .sf = sf,
+            .hw = hw_enum,
+            .imm16 = imm16,
+            .Rd = @enumFromInt(rd),
+        } } };
     }
 
-    /// Stub: Load/store register immediate (LDR, STR with immediate offset)
-    /// TODO: Implement proper encoding
+    /// Load/store register immediate (LDR, STR, LDRB, STRB, LDRH, STRH with immediate offset)
     pub fn loadStoreRegisterImmediate(
         comptime op: []const u8,
         sz: u2,
         rt: u5,
         rn: u5,
         offset: i12,
-    ) error{UnimplementedInstruction}!Instruction {
-        _ = op;
-        _ = sz;
-        _ = rt;
-        _ = rn;
-        _ = offset;
-        return error.UnimplementedInstruction;
+    ) Instruction {
+        const size_enum: LoadStoreRegisterUnsigned.Size = @enumFromInt(sz);
+        const imm12: u12 = @bitCast(offset);
+
+        if (std.mem.eql(u8, op, "ldr")) {
+            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
+                .ldr = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            } } };
+        } else if (std.mem.eql(u8, op, "str")) {
+            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
+                .str = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            } } };
+        } else if (std.mem.eql(u8, op, "ldrb")) {
+            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
+                .ldrb = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            } } };
+        } else if (std.mem.eql(u8, op, "strb")) {
+            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
+                .strb = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            } } };
+        } else if (std.mem.eql(u8, op, "ldrh")) {
+            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
+                .ldrh = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            } } };
+        } else if (std.mem.eql(u8, op, "strh")) {
+            return .{ .load_store_register = .{ .load_store_register_unsigned_immediate = .{
+                .strh = .{ .size = size_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rt = @enumFromInt(rt) },
+            } } };
+        } else {
+            @compileError("Invalid load/store register immediate op: " ++ op);
+        }
     }
 
     pub fn format(inst: Instruction, writer: *std.Io.Writer) std.Io.Writer.Error!void {
