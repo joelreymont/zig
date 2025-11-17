@@ -602,9 +602,9 @@ fn genPrologue(self: *CodeGen) !void {
     // STP X29, X30, [SP, #-16]!
     try self.addInst(.{
         .tag = .stp,
-        .ops = .mrr,
-        .data = .{ .mrr = .{
-            .addr = .{
+        .ops = .rrm,
+        .data = .{ .rrm = .{
+            .mem = .{
                 .base = .{ .reg = .sp },
                 .mod = .{ .pre_index = -16 },
             },
@@ -665,14 +665,14 @@ fn genEpilogue(self: *CodeGen) !void {
     // LDP X29, X30, [SP], #16
     try self.addInst(.{
         .tag = .ldp,
-        .ops = .rrm,
-        .data = .{ .rrm = .{
-            .r1 = .x29,
-            .r2 = .x30,
-            .addr = .{
+        .ops = .mrr,
+        .data = .{ .mrr = .{
+            .mem = .{
                 .base = .{ .reg = .sp },
                 .mod = .{ .post_index = 16 },
             },
+            .r1 = .x29,
+            .r2 = .x30,
         } },
     });
 
@@ -1076,7 +1076,7 @@ fn airCondBr(self: *CodeGen, inst: Air.Inst.Index) !void {
         .tag = .cbz,
         .ops = .r_rel,
         .data = .{ .r_rel = .{
-            .reg = cond_reg,
+            .rn = cond_reg,
             .target = 0, // Placeholder
         } },
     });
@@ -1547,11 +1547,11 @@ fn spillReg(self: *CodeGen, reg: Register) !void {
         .tag = .str,
         .ops = .mr,
         .data = .{ .mr = .{
-            .addr = .{
+            .mem = .{
                 .base = .{ .reg = .x29 }, // Frame pointer
                 .mod = .{ .immediate = -@as(i32, @intCast(spill_offset)) },
             },
-            .reg = reg,
+            .rs = reg,
         } },
     });
 
@@ -1584,8 +1584,8 @@ fn reloadReg(self: *CodeGen, inst: Air.Inst.Index, frame_addr: bits.FrameAddr) !
         .tag = .ldr,
         .ops = .rm,
         .data = .{ .rm = .{
-            .reg = reg,
-            .addr = .{
+            .rd = reg,
+            .mem = .{
                 .base = .{ .reg = .x29 }, // Frame pointer
                 .mod = .{ .immediate = -@as(i32, @intCast(frame_addr.off)) },
             },

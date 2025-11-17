@@ -535,6 +535,20 @@ pub const Inst = struct {
             rs: Register,
         },
 
+        /// Two registers + memory (for STP - store pair)
+        rrm: struct {
+            mem: Memory,
+            r1: Register,
+            r2: Register,
+        },
+
+        /// Memory + two registers (for LDP - load pair)
+        mrr: struct {
+            mem: Memory,
+            r1: Register,
+            r2: Register,
+        },
+
         /// Three registers + condition
         rrrc: struct {
             rd: Register,
