@@ -16718,6 +16718,25 @@ pub const Instruction = packed union {
     // Stubbed functions - to be implemented
     // ========================================================================
 
+    /// Stub: Add/Subtract immediate (ADD, ADDS, SUB, SUBS with immediate)
+    /// TODO: Implement proper encoding
+    pub fn addSubtractImmediate(
+        comptime op: []const u8,
+        sf: Register.GeneralSize,
+        rd: u5,
+        rn: u5,
+        imm12: u12,
+        shift: DataProcessingImmediate.Shift,
+    ) error{UnimplementedInstruction}!Instruction {
+        _ = op;
+        _ = sf;
+        _ = rd;
+        _ = rn;
+        _ = imm12;
+        _ = shift;
+        return error.UnimplementedInstruction;
+    }
+
     /// Stub: Data processing three source (MADD, MSUB, etc)
     /// TODO: Implement proper encoding
     pub fn dataProcessingThreeSource(

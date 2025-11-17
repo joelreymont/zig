@@ -108,7 +108,7 @@ inst_tracking: InstTrackingMap = .empty,
 blocks: std.AutoHashMapUnmanaged(Air.Inst.Index, BlockData) = .empty,
 
 /// Register allocation
-register_manager: RegisterManager = .{},
+register_manager: RegisterManager = RegisterManager.init(),
 
 /// Scope generation counter
 scope_generation: u32 = 0,
