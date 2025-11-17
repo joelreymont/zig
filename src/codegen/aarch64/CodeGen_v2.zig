@@ -215,6 +215,29 @@ const FrameAlloc = struct {
     }
 };
 
+/// Calling convention values - parameter and return value locations
+const CallMCValues = struct {
+    /// Argument MCValues
+    args: []MCValue,
+    /// Number of AIR arguments (not counting zero-bit args)
+    air_arg_count: u32,
+    /// Return value location
+    return_value: InstTracking,
+    /// Stack space needed for arguments (in bytes)
+    stack_byte_count: u31,
+    /// Stack alignment required
+    stack_align: InternPool.Alignment,
+    /// Number of GP registers used
+    gp_count: u32,
+    /// Number of FP registers used
+    fp_count: u32,
+
+    fn deinit(self: *CallMCValues, gpa: Allocator) void {
+        gpa.free(self.args);
+        self.* = undefined;
+    }
+};
+
 // ============================================================================
 // Main Entry Point - Generate MIR from AIR
 // ============================================================================
@@ -257,9 +280,13 @@ pub fn generate(
     function.frame_allocs.set(@intFromEnum(FrameIndex.stack_frame), .init(.{ .size = 0, .alignment = .@"1" }));
     function.frame_allocs.set(@intFromEnum(FrameIndex.call_frame), .init(.{ .size = 0, .alignment = .@"1" }));
 
-    // TODO: Resolve calling convention values
-    function.args = &.{};
-    function.ret_mcv = .init(.none);
+    // Resolve calling convention values
+    const fn_info = zcu.typeToFunc(fn_type).?;
+    var call_info = try function.resolveCallingConventionValues(fn_info, .stack_frame);
+    defer call_info.deinit(gpa);
+
+    function.args = call_info.args;
+    function.ret_mcv = call_info.return_value;
 
     // Generate MIR from AIR
     try function.gen();
@@ -300,6 +327,225 @@ fn deinit(self: *CodeGen, gpa: Allocator) void {
     self.mir_locals.deinit(gpa);
     self.mir_extra.deinit(gpa);
     self.mir_table.deinit(gpa);
+}
+
+// ============================================================================
+// Calling Convention
+// ============================================================================
+
+/// Resolve calling convention values for function parameters and return value
+/// Implements AAPCS64 (ARM Procedure Call Standard for ARM64)
+fn resolveCallingConventionValues(
+    self: *CodeGen,
+    fn_info: InternPool.Key.FuncType,
+    stack_frame_base: FrameIndex,
+) !CallMCValues {
+    const pt = self.pt;
+    const zcu = pt.zcu;
+    const ip = &zcu.intern_pool;
+    const cc = fn_info.cc;
+
+    const param_types = try self.gpa.alloc(Type, fn_info.param_types.len);
+    defer self.gpa.free(param_types);
+
+    for (param_types, fn_info.param_types.get(ip)) |*param_ty, arg_ty|
+        param_ty.* = .fromInterned(arg_ty);
+
+    var result: CallMCValues = .{
+        .args = try self.gpa.alloc(MCValue, param_types.len),
+        .air_arg_count = 0,
+        .return_value = undefined,
+        .stack_byte_count = 0,
+        .stack_align = .@"16", // AAPCS64 requires 16-byte stack alignment
+        .gp_count = 0,
+        .fp_count = 0,
+    };
+    errdefer self.gpa.free(result.args);
+
+    const ret_ty: Type = .fromInterned(fn_info.return_type);
+
+    switch (cc) {
+        .naked => {
+            assert(result.args.len == 0);
+            result.return_value = .init(.unreach);
+            result.stack_align = .@"16";
+        },
+        .aapcs, .aapcs_vfp, .auto => {
+            // AAPCS64 parameter passing rules
+            const param_gp_regs = abi.arg_gp_regs;
+            var param_gp_index: u32 = 0;
+            const param_fp_regs = abi.arg_fp_regs;
+            var param_fp_index: u32 = 0;
+
+            // Return value handling
+            if (ret_ty.isNoReturn(zcu)) {
+                result.return_value = .init(.unreach);
+            } else if (!ret_ty.hasRuntimeBitsIgnoreComptime(zcu)) {
+                result.return_value = .init(.none);
+            } else {
+                const ret_size: u32 = @intCast(ret_ty.abiSize(zcu));
+
+                // Classify return type
+                const ret_class = abi.classifyType(ret_ty, zcu);
+                result.return_value = switch (ret_class) {
+                    .byval, .integer => blk: {
+                        // Simple types: X0 for <= 64 bits, X0+X1 for <= 128 bits
+                        if (ret_size <= 8) {
+                            const reg = registerAlias(abi.ret_gp_regs[0], ret_size);
+                            break :blk .init(.{ .register = reg });
+                        } else if (ret_size <= 16) {
+                            break :blk .init(.{ .register_pair = .{
+                                abi.ret_gp_regs[0],
+                                abi.ret_gp_regs[1],
+                            } });
+                        } else {
+                            // Indirect return: caller passes pointer in X8
+                            param_gp_index = 1; // Reserve X0 for return pointer
+                            break :blk .init(.{ .register = .x8 });
+                        }
+                    },
+                    .double_integer => .init(.{ .register_pair = .{
+                        abi.ret_gp_regs[0],
+                        abi.ret_gp_regs[1],
+                    } }),
+                    .float_array => |count| blk: {
+                        // HFA (Homogeneous Float Aggregate): up to 4 FP regs
+                        if (count == 1) {
+                            const reg = registerAlias(abi.ret_fp_regs[0], ret_size);
+                            break :blk .init(.{ .register = reg });
+                        } else {
+                            // For now, treat multi-FP returns as indirect
+                            // TODO: Implement proper HFA support
+                            param_gp_index = 1;
+                            break :blk .init(.{ .register = .x8 });
+                        }
+                    },
+                    .memory => blk: {
+                        // Indirect return
+                        param_gp_index = 1;
+                        break :blk .init(.{ .register = .x8 });
+                    },
+                };
+            }
+
+            // Parameter passing
+            for (param_types, result.args) |param_ty, *arg| {
+                if (!param_ty.hasRuntimeBitsIgnoreComptime(zcu)) {
+                    arg.* = .none;
+                    continue;
+                }
+                result.air_arg_count += 1;
+
+                const param_size: u32 = @intCast(param_ty.abiSize(zcu));
+                const param_class = abi.classifyType(param_ty, zcu);
+
+                switch (param_class) {
+                    .byval, .integer => {
+                        // Integer/pointer parameters
+                        if (param_gp_index < param_gp_regs.len and param_size <= 8) {
+                            const reg = registerAlias(param_gp_regs[param_gp_index], param_size);
+                            arg.* = .{ .register = reg };
+                            param_gp_index += 1;
+                        } else if (param_gp_index + 1 < param_gp_regs.len and param_size <= 16) {
+                            arg.* = .{ .register_pair = .{
+                                param_gp_regs[param_gp_index],
+                                param_gp_regs[param_gp_index + 1],
+                            } };
+                            param_gp_index += 2;
+                        } else {
+                            // Spill to stack
+                            const param_align = param_ty.abiAlignment(zcu).max(.@"8");
+                            result.stack_byte_count = @intCast(param_align.forward(result.stack_byte_count));
+                            result.stack_align = result.stack_align.max(param_align);
+                            arg.* = .{ .load_frame = .{
+                                .index = stack_frame_base,
+                                .off = result.stack_byte_count,
+                            } };
+                            result.stack_byte_count += param_size;
+                        }
+                    },
+                    .double_integer => {
+                        if (param_gp_index + 1 < param_gp_regs.len) {
+                            arg.* = .{ .register_pair = .{
+                                param_gp_regs[param_gp_index],
+                                param_gp_regs[param_gp_index + 1],
+                            } };
+                            param_gp_index += 2;
+                        } else {
+                            // Spill to stack
+                            const param_align = InternPool.Alignment.@"16";
+                            result.stack_byte_count = @intCast(param_align.forward(result.stack_byte_count));
+                            result.stack_align = result.stack_align.max(param_align);
+                            arg.* = .{ .load_frame = .{
+                                .index = stack_frame_base,
+                                .off = result.stack_byte_count,
+                            } };
+                            result.stack_byte_count += param_size;
+                        }
+                    },
+                    .float_array => |count| {
+                        // Floating point parameters
+                        if (count == 1 and param_fp_index < param_fp_regs.len) {
+                            const reg = registerAlias(param_fp_regs[param_fp_index], param_size);
+                            arg.* = .{ .register = reg };
+                            param_fp_index += 1;
+                        } else {
+                            // HFA or spill to stack
+                            const param_align = param_ty.abiAlignment(zcu).max(.@"8");
+                            result.stack_byte_count = @intCast(param_align.forward(result.stack_byte_count));
+                            result.stack_align = result.stack_align.max(param_align);
+                            arg.* = .{ .load_frame = .{
+                                .index = stack_frame_base,
+                                .off = result.stack_byte_count,
+                            } };
+                            result.stack_byte_count += param_size;
+                        }
+                    },
+                    .memory => {
+                        // Large types passed on stack
+                        const param_align = param_ty.abiAlignment(zcu).max(.@"8");
+                        result.stack_byte_count = @intCast(param_align.forward(result.stack_byte_count));
+                        result.stack_align = result.stack_align.max(param_align);
+                        arg.* = .{ .load_frame = .{
+                            .index = stack_frame_base,
+                            .off = result.stack_byte_count,
+                        } };
+                        result.stack_byte_count += param_size;
+                    },
+                }
+            }
+
+            result.gp_count = param_gp_index;
+            result.fp_count = param_fp_index;
+        },
+        else => return self.fail("TODO implement function parameters and return values for {} on ARM64", .{cc}),
+    }
+
+    result.stack_byte_count = @intCast(result.stack_align.forward(result.stack_byte_count));
+    return result;
+}
+
+/// Returns register wide enough to hold at least `size_bytes`
+fn registerAlias(reg: Register, size_bytes: u32) Register {
+    if (size_bytes == 0) unreachable;
+
+    return switch (reg.class()) {
+        .general_purpose => if (size_bytes <= 4)
+            reg.to32()
+        else
+            reg.to64(),
+        .vector => reg, // Keep SIMD registers as-is for now
+        .special => reg, // SP, XZR, WZR
+    };
+}
+
+fn fail(self: *CodeGen, comptime format: []const u8, args: anytype) error{ OutOfMemory, CodegenFail } {
+    @branchHint(.cold);
+    const zcu = self.pt.zcu;
+    return switch (self.owner) {
+        .nav_index => |i| zcu.codegenFail(i, format, args),
+        .lazy_sym => |s| zcu.codegenFailType(s.ty, format, args),
+    };
 }
 
 // ============================================================================

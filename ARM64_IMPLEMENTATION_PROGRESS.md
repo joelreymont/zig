@@ -109,7 +109,7 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
 
 **Files Created:**
 
-7. **`CodeGen_v2.zig`** (734 lines)
+7. **`CodeGen_v2.zig`** (now ~800 lines, enhanced)
    - Main code generator: AIR → MIR translation
    - `generate()` entry point matching x86_64 signature
    - Liveness-based register allocation integration
@@ -124,6 +124,14 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
      - register (single register)
      - register_pair (128-bit values)
      - memory, load_frame, frame_addr, register_offset
+   - **✅ Calling Convention Resolution** (AAPCS64):
+     - `CallMCValues` structure
+     - `resolveCallingConventionValues()` function
+     - Parameter passing: X0-X7 (GP), V0-V7 (FP)
+     - Return values: X0-X1 (GP), V0-V3 (FP/HFA)
+     - Stack overflow handling
+     - Register width aliasing (W vs X registers)
+     - Indirect return pointer (X8)
 
 **AIR Instruction Handlers Implemented:**
 
@@ -201,14 +209,15 @@ src/codegen/aarch64/
 - [x] Basic AIR handlers (arithmetic, bitwise, shifts)
 - [x] Load/store AIR handlers
 - [x] Compare/branch AIR handlers
+- [x] Calling convention resolution (AAPCS64 parameter/return handling)
 - [x] Documentation (this file + ARM64_MODERNIZATION_PLAN.md)
 
 ### In Progress 🚧
 
-- [ ] Calling convention resolution (`resolveCallingConventionValues`)
+- [ ] Function prologue generation (save FP/LR, setup stack)
+- [ ] Function epilogue generation (restore FP/LR, teardown stack)
 - [ ] Complete AIR handler coverage (~200+ remaining)
 - [ ] Register spilling to stack
-- [ ] Function prologue/epilogue generation
 - [ ] Integration with existing aarch64.zig
 
 ### Not Started ⏸️
@@ -371,8 +380,8 @@ src/codegen/aarch64/
 
 ### Critical 🔴
 
-- [ ] **Calling convention not implemented** - Functions can't have parameters yet
-- [ ] **Prologue/epilogue missing** - Functions don't save/restore registers
+- [x] ~~**Calling convention not implemented**~~ - ✅ DONE: AAPCS64 implemented
+- [ ] **Prologue/epilogue missing** - Functions don't save/restore registers (IN PROGRESS)
 - [ ] **No register spilling** - Will run out of registers on complex functions
 - [ ] **Branch targets not tracked** - airBr() uses placeholder
 
