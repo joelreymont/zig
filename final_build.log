@@ -1,0 +1,4 @@
+cc -o zig-wasm2c stage1/wasm2c.c -O2 -std=c99
+./zig-wasm2c stage1/zig1.wasm zig1.c
+cc -o zig1 zig1.c stage1/wasi.c -std=c99 -Os -lm
+./zig1 lib build-exe -ofmt=c -lc -OReleaseSmall --name zig2 -femit-bin=zig2.c -target x86_64-linux --dep build_options --dep aro -Mroot=src/main.zig -Mbuild_options=config.zig -Maro=lib/compiler/aro/aro.zig
