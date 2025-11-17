@@ -373,7 +373,7 @@ fn resolveCallingConventionValues(
             result.return_value = .init(.unreach);
             result.stack_align = .@"16";
         },
-        .aapcs, .aapcs_vfp, .auto => {
+        .auto => {
             // AAPCS64 parameter passing rules
             const param_gp_regs = abi.arg_gp_regs;
             var param_gp_index: u32 = 0;

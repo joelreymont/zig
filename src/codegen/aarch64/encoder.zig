@@ -137,7 +137,7 @@ fn encodeAdd(inst: Mir.Inst) Error!Instruction {
                 data.rd.id(),
                 data.rn.id(),
                 @intCast(data.imm),
-                .unshifted,
+                0, // unshifted
                 false,
             );
         },
@@ -171,7 +171,7 @@ fn encodeAdds(inst: Mir.Inst) Error!Instruction {
                 data.rd.id(),
                 data.rn.id(),
                 @intCast(data.imm),
-                .unshifted,
+                0, // unshifted
                 true, // Set flags
             );
         },
@@ -200,12 +200,12 @@ fn encodeSub(inst: Mir.Inst) Error!Instruction {
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             if (data.imm > 0xFFF) return error.InvalidImmediate;
             break :blk Instruction.addSubtractImmediate(
-                .sub,
+                "sub",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
                 @intCast(data.imm),
-                .unshifted,
+                0, // unshifted
                 false,
             );
         },
@@ -234,12 +234,12 @@ fn encodeSubs(inst: Mir.Inst) Error!Instruction {
             const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
             if (data.imm > 0xFFF) return error.InvalidImmediate;
             break :blk Instruction.addSubtractImmediate(
-                .sub,
+                "sub",
                 @enumFromInt(sf),
                 data.rd.id(),
                 data.rn.id(),
                 @intCast(data.imm),
-                .unshifted,
+                0, // unshifted
                 true, // Set flags
             );
         },
@@ -533,7 +533,7 @@ fn encodeLdrh(inst: Mir.Inst) Error!Instruction {
     return switch (data.mem.offset) {
         .immediate => |imm| blk: {
             if (imm < 0 or imm > 0x1FFE) return error.InvalidImmediate;
-            const imm12: u12 = @intCast(@divExact(imm, 2));
+            const imm12: i12 = @intCast(@divExact(imm, 2));
             break :blk Instruction.loadStoreRegisterImmediate(
                 "ldrh",
                 1, // halfword size
@@ -551,7 +551,7 @@ fn encodeStrh(inst: Mir.Inst) Error!Instruction {
     return switch (data.mem.offset) {
         .immediate => |imm| blk: {
             if (imm < 0 or imm > 0x1FFE) return error.InvalidImmediate;
-            const imm12: u12 = @intCast(@divExact(imm, 2));
+            const imm12: i12 = @intCast(@divExact(imm, 2));
             break :blk Instruction.loadStoreRegisterImmediate(
                 "strh",
                 1, // halfword size
@@ -592,8 +592,8 @@ fn encodeBr(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.r;
     return Instruction.unconditionalBranchRegister(
         "br",
-        0,
-        0,
+        false,
+        false,
         data.id(),
         0,
     );
@@ -603,8 +603,8 @@ fn encodeBlr(inst: Mir.Inst) Error!Instruction {
     const data = inst.data.r;
     return Instruction.unconditionalBranchRegister(
         "blr",
-        0,
-        0,
+        false,
+        false,
         data.id(),
         0,
     );
@@ -614,8 +614,8 @@ fn encodeRet(_: Mir.Inst) Error!Instruction {
     // RET defaults to X30 (LR)
     return Instruction.unconditionalBranchRegister(
         "ret",
-        0,
-        0,
+        false,
+        false,
         30, // X30/LR
         0,
     );

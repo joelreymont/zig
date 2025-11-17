@@ -16561,24 +16561,22 @@ pub const Instruction = packed union {
     /// Create unconditional branch register instruction (BR, BLR, RET)
     pub fn unconditionalBranchRegister(
         comptime op: []const u8,
-        a: u1,
-        m: u1,
+        a: bool,
+        m: bool,
         rn: u5,
         rm: u5,
     ) Instruction {
-        const UnconditionalBR = BranchExceptionGeneratingSystem.UnconditionalBranchRegister;
-        _ = UnconditionalBR;
         if (std.mem.eql(u8, op, "br")) {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
-                .br = .{ .A = a, .M = m, .Rn = rn, .Rm = rm },
+                .br = .{ .A = a, .M = m, .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm) },
             } } };
         } else if (std.mem.eql(u8, op, "blr")) {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
-                .blr = .{ .A = a, .M = m, .Rn = rn, .Rm = rm },
+                .blr = .{ .A = a, .M = m, .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm) },
             } } };
         } else if (std.mem.eql(u8, op, "ret")) {
             return .{ .branch_exception_generating_system = .{ .unconditional_branch_register = .{
-                .ret = .{ .Rn = rn },
+                .ret = .{ .Rn = @enumFromInt(rn) },
             } } };
         } else {
             @compileError("Invalid unconditional branch register op: " ++ op);
@@ -16718,23 +16716,40 @@ pub const Instruction = packed union {
     // Stubbed functions - to be implemented
     // ========================================================================
 
-    /// Stub: Add/Subtract immediate (ADD, ADDS, SUB, SUBS with immediate)
-    /// TODO: Implement proper encoding
+    /// Add/Subtract immediate (ADD, ADDS, SUB, SUBS with immediate)
     pub fn addSubtractImmediate(
         comptime op: []const u8,
         sf: Register.GeneralSize,
         rd: u5,
         rn: u5,
         imm12: u12,
-        shift: DataProcessingImmediate.Shift,
-    ) error{UnimplementedInstruction}!Instruction {
-        _ = op;
-        _ = sf;
-        _ = rd;
-        _ = rn;
-        _ = imm12;
-        _ = shift;
-        return error.UnimplementedInstruction;
+        shift: u2,
+        set_flags: bool,
+    ) Instruction {
+        const shift_enum: DataProcessingImmediate.AddSubtractImmediate.Shift = @enumFromInt(shift);
+        if (std.mem.eql(u8, op, "add")) {
+            if (set_flags) {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .adds = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            } else {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .add = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            }
+        } else if (std.mem.eql(u8, op, "sub")) {
+            if (set_flags) {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .subs = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            } else {
+                return .{ .data_processing_immediate = .{ .add_subtract_immediate = .{
+                    .sub = .{ .sf = sf, .shift = shift_enum, .imm12 = imm12, .Rn = @enumFromInt(rn), .Rd = @enumFromInt(rd) },
+                } } };
+            }
+        } else {
+            @compileError("Invalid add/subtract immediate op: " ++ op);
+        }
     }
 
     /// Stub: Data processing three source (MADD, MSUB, etc)
