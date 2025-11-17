@@ -1029,24 +1029,79 @@ fn airCmp(self: *CodeGen, inst: Air.Inst.Index) !void {
 fn airBr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const br = self.air.instructions.items(.data)[@intFromEnum(inst)].br;
 
-    // Get target block
-    const target_block = self.blocks.get(br.block_inst) orelse return error.CodegenFail;
-    _ = target_block;
+    // Get target block data
+    const block_data = self.blocks.getPtr(br.block_inst) orelse {
+        return self.fail("Branch to unregistered block {d}", .{@intFromEnum(br.block_inst)});
+    };
 
-    // Emit branch (offset will be filled by Lower)
+    // Emit unconditional branch
+    const branch_inst: Mir.Inst.Index = @intCast(self.mir_instructions.len);
     try self.addInst(.{
         .tag = .b,
         .ops = .rel,
-        .data = .{ .rel = .{ .target = 0 } }, // Will be fixed up
+        .data = .{ .rel = .{ .target = 0 } }, // Placeholder, will be patched
     });
+
+    // Record this branch for later patching
+    try block_data.relocs.append(self.gpa, branch_inst);
+
+    // TODO: Handle block operand value if needed
+    _ = br.operand;
 }
 
 fn airCondBr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const pl_op = self.air.instructions.items(.data)[@intFromEnum(inst)].pl_op;
-    _ = pl_op;
+    const cond = try self.resolveInst(pl_op.operand);
+    const extra = self.air.extraData(Air.CondBr, pl_op.payload);
+    const then_body: []const Air.Inst.Index =
+        @ptrCast(self.air.extra.items[extra.end..][0..extra.data.then_body_len]);
+    const else_body: []const Air.Inst.Index =
+        @ptrCast(self.air.extra.items[extra.end + then_body.len ..][0..extra.data.else_body_len]);
 
-    // TODO: Implement conditional branch
-    return error.CodegenFail;
+    // Emit conditional branch based on condition value
+    // If cond is in a register, use CBZ/CBNZ (compare and branch zero/nonzero)
+    const cond_reg = switch (cond) {
+        .register => |reg| reg,
+        else => blk: {
+            // Materialize to register if needed
+            const reg = try self.register_manager.allocReg(inst, .gp);
+            // TODO: Load immediate/memory to register
+            break :blk reg;
+        },
+    };
+
+    // Branch to else if condition is zero
+    const else_branch: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    try self.addInst(.{
+        .tag = .cbz,
+        .ops = .r_rel,
+        .data = .{ .r_rel = .{
+            .reg = cond_reg,
+            .target = 0, // Placeholder
+        } },
+    });
+
+    // Execute then body
+    try self.genBody(then_body);
+
+    // After then body, jump past else body
+    const skip_else_branch: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    try self.addInst(.{
+        .tag = .b,
+        .ops = .rel,
+        .data = .{ .rel = .{ .target = 0 } }, // Placeholder
+    });
+
+    // Patch else branch to point here
+    const else_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    self.mir_instructions.items(.data)[else_branch].r_rel.target = else_start;
+
+    // Execute else body
+    try self.genBody(else_body);
+
+    // Patch skip_else branch to point after else body
+    const after_else: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    self.mir_instructions.items(.data)[skip_else_branch].rel.target = after_else;
 }
 
 fn airRet(self: *CodeGen, inst: Air.Inst.Index) !void {
@@ -1078,6 +1133,28 @@ fn airBlock(self: *CodeGen, inst: Air.Inst.Index) !void {
     try self.blocks.put(self.gpa, inst, .{
         .state = .{},
     });
+
+    // Process block body
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const extra = self.air.extraData(Air.Block, ty_pl.payload);
+    const body: []const Air.Inst.Index = @ptrCast(self.air.extra.items[extra.end..][0..extra.data.body_len]);
+
+    try self.genBody(body);
+
+    // Patch all branches to this block
+    const block_data = self.blocks.getPtr(inst).?;
+    const current_inst: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    for (block_data.relocs.items) |reloc_inst| {
+        self.mir_instructions.items(.data)[reloc_inst].rel.target = current_inst;
+    }
+}
+
+fn genBody(self: *CodeGen, body: []const Air.Inst.Index) !void {
+    const air_tags = self.air.instructions.items(.tag);
+    for (body) |body_inst| {
+        const tag = air_tags[@intFromEnum(body_inst)];
+        try self.genInst(body_inst, tag);
+    }
 }
 
 fn airDiv(self: *CodeGen, inst: Air.Inst.Index) !void {
