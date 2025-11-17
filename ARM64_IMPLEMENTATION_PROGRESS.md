@@ -109,7 +109,7 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
 
 **Files Created:**
 
-7. **`CodeGen_v2.zig`** (now 1,416 lines, heavily enhanced)
+7. **`CodeGen_v2.zig`** (now 1,605 lines, heavily enhanced)
    - Main code generator: AIR → MIR translation
    - `generate()` entry point matching x86_64 signature
    - Liveness-based register allocation integration
@@ -139,6 +139,19 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
      - Frame pointer setup (X29)
      - Link register preservation (X30)
      - Naked function support (skip prologue/epilogue)
+   - **✅ Branch Target Tracking**:
+     - `airBr()`: Unconditional branches with relocation tracking
+     - `airCondBr()`: Full if-then-else with CBZ/B
+     - `airBlock()`: Patches all incoming branch targets
+     - `genBody()`: Process instruction sequences
+     - Forward branch handling via BlockData.relocs
+   - **✅ Register Spilling**:
+     - `allocRegOrSpill()`: Transparent spill-on-demand
+     - `spillReg()`: STR to stack, update tracking
+     - `reloadReg()`: LDR from stack
+     - `findSpillCandidate()`: First-fit heuristic
+     - Stack offset management (grows from FP)
+     - Debug markers (pseudo_spill/pseudo_reload)
 
 **AIR Instruction Handlers Implemented:**
 
@@ -149,7 +162,7 @@ AIR → CodeGen_v2.zig → Mir_v2 (abstract) → Lower.zig → Emit.zig → Mach
 | **Shifts** | shl, shr | ✅ Complete |
 | **Memory** | load, store | ✅ Complete |
 | **Compare** | cmp_eq, cmp_neq, cmp_lt, cmp_lte, cmp_gt, cmp_gte | ✅ Complete |
-| **Branches** | br, cond_br | ✅ Partial (br only) |
+| **Branches** | br, cond_br | ✅ Complete |
 | **Control** | ret, ret_load | ✅ Complete |
 | **Constants** | constant | ✅ Basic |
 | **Type Conv** | intcast, trunc, bool_to_int | ✅ Complete |
@@ -186,14 +199,14 @@ fn airAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 ```
 
-**Total Phase 2:** 1,416 lines (initial 734 + expansions)
+**Total Phase 2:** 1,605 lines (initial 734 + expansions)
 
 ---
 
 ## File Statistics
 
 ```
-Total lines added: 3,949 (across 7 new files)
+Total lines added: 4,138 (across 7 new files)
 
 src/codegen/aarch64/
 ├── bits.zig              372 lines   [Phase 1]
@@ -202,7 +215,7 @@ src/codegen/aarch64/
 ├── encoder.zig           638 lines   [Phase 1]
 ├── Lower.zig             255 lines   [Phase 1]
 ├── Emit.zig              126 lines   [Phase 1]
-└── CodeGen_v2.zig        1,416 lines [Phase 2 + expansions]
+└── CodeGen_v2.zig        1,605 lines [Phase 2 + expansions]
 ```
 
 ---
@@ -224,12 +237,13 @@ src/codegen/aarch64/
 - [x] Calling convention resolution (AAPCS64 parameter/return handling)
 - [x] Function prologue generation (save FP/LR, setup stack)
 - [x] Function epilogue generation (restore FP/LR, teardown stack)
+- [x] Branch target tracking and control flow (br, cond_br, blocks)
+- [x] Register spilling to stack (automatic pressure management)
 - [x] Documentation (this file + ARM64_MODERNIZATION_PLAN.md)
 
 ### In Progress 🚧
 
-- [ ] Complete AIR handler coverage (~200+ remaining)
-- [ ] Register spilling to stack
+- [ ] Complete AIR handler coverage (~160+ remaining)
 - [ ] Integration with existing aarch64.zig
 
 ### Not Started ⏸️
@@ -394,8 +408,8 @@ src/codegen/aarch64/
 
 - [x] ~~**Calling convention not implemented**~~ - ✅ DONE: AAPCS64 implemented
 - [x] ~~**Prologue/epilogue missing**~~ - ✅ DONE: FP/LR save/restore implemented
-- [ ] **No register spilling** - Will run out of registers on complex functions
-- [ ] **Branch targets not tracked** - airBr() uses placeholder
+- [x] ~~**No register spilling**~~ - ✅ DONE: Auto-spill with allocRegOrSpill
+- [x] ~~**Branch targets not tracked**~~ - ✅ DONE: Full br/cond_br/block support
 
 ### Important 🟡
 
