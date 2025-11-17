@@ -16961,14 +16961,12 @@ pub const Instruction = packed union {
             .@"union" => |info| {
                 if (info.layout != .@"packed" or @bitSizeOf(Type) != @bitSizeOf(Backing)) {
                     // Type should have u32 abi
-                    _ = name;
                 }
                 for (info.fields) |field| verify(name ++ "." ++ field.name, field.type);
             },
             .@"struct" => |info| {
                 if (info.layout != .@"packed" or info.backing_integer != Backing) {
                     // Type should have u32 abi
-                    _ = name;
                 }
                 var bit_offset = 0;
                 for (info.fields) |field| {
