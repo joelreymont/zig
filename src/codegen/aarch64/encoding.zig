@@ -16605,8 +16605,7 @@ pub const Instruction = packed union {
                 .cbnz = .{ .Rt = @enumFromInt(rt), .imm19 = offset, .sf = sf },
             } } };
         } else {
-            @compileLog("Invalid compare and branch op:", op);
-            unreachable;
+            unreachable; // Invalid compare and branch op
         }
     }
 
@@ -16665,8 +16664,7 @@ pub const Instruction = packed union {
                 .csneg = .{ .Rd = @enumFromInt(rd), .Rn = @enumFromInt(rn), .Rm = @enumFromInt(rm), .cond = cond, .sf = sf },
             } } };
         } else {
-            @compileLog("Invalid conditional select op:", op);
-            unreachable;
+            unreachable; // Invalid conditional select op
         }
     }
 
@@ -16686,8 +16684,7 @@ pub const Instruction = packed union {
             } } };
         } else {
             _ = opc; // May be needed for other variants
-            @compileLog("Invalid exception generation op:", op);
-            unreachable;
+            unreachable; // Invalid exception generation op
         }
     }
 
@@ -16706,8 +16703,7 @@ pub const Instruction = packed union {
                 .isb = .{ .CRm = option },
             } } };
         } else {
-            @compileLog("Invalid barrier op:", op);
-            unreachable;
+            unreachable; // Invalid barrier op
         }
     }
 
@@ -16964,13 +16960,15 @@ pub const Instruction = packed union {
         switch (@typeInfo(Type)) {
             .@"union" => |info| {
                 if (info.layout != .@"packed" or @bitSizeOf(Type) != @bitSizeOf(Backing)) {
-                    @compileLog(name ++ " should have u32 abi");
+                    // Type should have u32 abi
+                    _ = name;
                 }
                 for (info.fields) |field| verify(name ++ "." ++ field.name, field.type);
             },
             .@"struct" => |info| {
                 if (info.layout != .@"packed" or info.backing_integer != Backing) {
-                    @compileLog(name ++ " should have u32 abi");
+                    // Type should have u32 abi
+                    _ = name;
                 }
                 var bit_offset = 0;
                 for (info.fields) |field| {
