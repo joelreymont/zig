@@ -24,7 +24,7 @@ pub fn emitMir(
     atom_index: u32,
     w: *std.Io.Writer,
     debug_output: link.File.DebugInfoOutput,
-) error{ CodegenFail, OutOfMemory, Overflow, RelocationNotByteAligned, WriteFailed }!void {
+) !void {
     const zcu = pt.zcu;
     const gpa = zcu.gpa;
     const func = zcu.funcInfo(func_index);
