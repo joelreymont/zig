@@ -705,6 +705,13 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .min => self.airMinMax(inst, true),
         .max => self.airMinMax(inst, false),
         .abs => self.airAbs(inst),
+        .mul_add => self.airMulAdd(inst),
+
+        // Overflow arithmetic
+        .add_with_overflow => self.airOverflowOp(inst, .add),
+        .sub_with_overflow => self.airOverflowOp(inst, .sub),
+        .mul_with_overflow => self.airOverflowOp(inst, .mul),
+        .shl_with_overflow => self.airOverflowOp(inst, .shl),
 
         // Bitwise
         .bit_and => self.airAnd(inst),
@@ -2956,6 +2963,127 @@ fn airSplat(self: *CodeGen, inst: Air.Inst.Index) !void {
     });
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, sub, mul, shl }) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const bin = self.air.extraData(Air.Bin, ty_pl.payload).data;
+    const lhs = try self.resolveInst(bin.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin.rhs.toIndex().?);
+
+    // Result is a tuple: { result, overflow_bit }
+    // We need to allocate two registers for the result
+    const result_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    const overflow_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+
+    switch (op) {
+        .add => {
+            // ADDS - Add and set flags
+            try self.addInst(.{
+                .tag = .adds,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = result_reg,
+                    .rn = lhs.register,
+                    .rm = rhs.register,
+                } },
+            });
+
+            // CSET overflow_reg, VS - Set to 1 if overflow
+            try self.addInst(.{
+                .tag = .cset,
+                .ops = .rrc,
+                .data = .{ .rrc = .{
+                    .rd = overflow_reg,
+                    .rn = .xzr,
+                    .cond = .vs, // overflow set
+                } },
+            });
+        },
+        .sub => {
+            // SUBS - Subtract and set flags
+            try self.addInst(.{
+                .tag = .subs,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = result_reg,
+                    .rn = lhs.register,
+                    .rm = rhs.register,
+                } },
+            });
+
+            // CSET overflow_reg, VS - Set to 1 if overflow
+            try self.addInst(.{
+                .tag = .cset,
+                .ops = .rrc,
+                .data = .{ .rrc = .{
+                    .rd = overflow_reg,
+                    .rn = .xzr,
+                    .cond = .vs, // overflow set
+                } },
+            });
+        },
+        .mul => {
+            // For multiplication overflow detection on ARM64:
+            // - For signed: use SMULL (signed multiply long) or SMULH (high part)
+            // - For unsigned: use UMULH (unsigned multiply high)
+            // Compare high part with sign extension of low part
+            return self.fail("TODO: mul_with_overflow requires SMULH/UMULH comparison", .{});
+        },
+        .shl => {
+            // For shift overflow: shift, then shift back and compare
+            // Or use signed/unsigned overflow detection
+            return self.fail("TODO: shl_with_overflow requires shift-and-compare logic", .{});
+        },
+    }
+
+    // Store as register pair
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register_pair = .{ result_reg, overflow_reg } }));
+}
+
+fn airMulAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const pl_op = self.air.instructions.items(.data)[@intFromEnum(inst)].pl_op;
+    const bin = self.air.extraData(Air.Bin, pl_op.payload).data;
+    const addend = try self.resolveInst(pl_op.operand.toIndex().?);
+    const lhs = try self.resolveInst(bin.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin.rhs.toIndex().?);
+
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
+
+    if (is_float) {
+        // FMADD - Floating-point fused multiply-add: d = a + (n * m)
+        const dst_reg = try self.register_manager.allocReg(inst, .vector);
+
+        try self.addInst(.{
+            .tag = .fmadd,
+            .ops = .rrrr,
+            .data = .{ .rrrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+                .ra = addend.register,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    } else {
+        // MADD - Integer multiply-add: d = a + (n * m)
+        const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+        try self.addInst(.{
+            .tag = .madd,
+            .ops = .rrrr,
+            .data = .{ .rrrr = .{
+                .rd = dst_reg,
+                .rn = lhs.register,
+                .rm = rhs.register,
+                .ra = addend.register,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    }
 }
 
 fn airIntCast(self: *CodeGen, inst: Air.Inst.Index) !void {
