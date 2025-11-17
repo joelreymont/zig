@@ -564,10 +564,11 @@ pub const Inst = struct {
             cond: Condition,
         },
 
-        /// Register + condition
+        /// Register + condition + branch target (for conditional branches like CBZ, CBNZ)
         rc: struct {
             rn: Register,
             cond: Condition,
+            target: ?Inst.Index = null,
         },
 
         /// Branch target (offset)

@@ -310,6 +310,20 @@ pub const Register = enum(u8) {
     pub const lr: Register = .x30;
 };
 
+/// Register offset for memory addressing modes
+pub const RegisterOffset = struct {
+    reg: Register,
+    shift: u3, // 0-3 for LSL amount
+    extend: Extend = .none,
+
+    pub const Extend = enum {
+        none,
+        uxtw, // Zero-extend W register to 64 bits
+        sxtw, // Sign-extend W register to 64 bits
+        sxtx, // Sign-extend X register (identity)
+    };
+};
+
 /// Memory operand for load/store instructions
 pub const Memory = struct {
     base: Register,
@@ -326,19 +340,6 @@ pub const Memory = struct {
         post_index: i32,
         /// PC-relative (for literals)
         pc_relative: i32,
-    };
-
-    pub const RegisterOffset = struct {
-        reg: Register,
-        shift: u3, // 0-3 for LSL amount
-        extend: Extend = .none,
-
-        pub const Extend = enum {
-            none,
-            uxtw, // Zero-extend W register to 64 bits
-            sxtw, // Sign-extend W register to 64 bits
-            sxtx, // Sign-extend X register (identity)
-        };
     };
 
     /// Create simple immediate offset memory operand
