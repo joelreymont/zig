@@ -784,6 +784,15 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Blocks
         .block => self.airBlock(inst),
 
+        // Function arguments
+        .arg => self.airArg(inst),
+
+        // Unreachable/trap
+        .unreach, .breakpoint => self.airUnreachable(inst),
+
+        // Bitcast
+        .bitcast => self.airBitcast(inst),
+
         // No-ops
         .dbg_stmt => {},
         .dbg_inline_block => {},
@@ -2550,6 +2559,99 @@ fn airBoolToInt(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     // Boolean is already 0 or 1, just track it
     try self.inst_tracking.put(self.gpa, inst, .init(operand));
+}
+
+fn airArg(self: *CodeGen, inst: Air.Inst.Index) !void {
+    // Function arguments are passed in registers or on the stack according to the calling convention
+    // For ARM64 C calling convention:
+    // - First 8 integer args in X0-X7
+    // - First 8 float args in D0-D7 (V0-V7 lower 64 bits)
+    // - Additional args on stack
+
+    const arg_data = self.air.instructions.items(.data)[@intFromEnum(inst)].arg;
+    const arg_index = arg_data.zir_param_index;
+    const arg_ty = arg_data.ty.toType();
+
+    // Determine if this is a float or integer argument
+    const is_float = arg_ty.isRuntimeFloat();
+
+    // For now, simplified: assume all args fit in registers
+    // TODO: Handle stack arguments when >8 args
+    if (arg_index >= 8) {
+        return self.fail("TODO: ARM64 stack arguments not yet implemented", .{});
+    }
+
+    // Determine which register the argument is in
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const src_reg = if (is_float)
+        // Float args in V0-V7 (D0-D7)
+        Register.v0.offset(@intCast(arg_index))
+    else
+        // Integer args in X0-X7
+        Register.x0.offset(@intCast(arg_index));
+
+    // Mark the register as occupied by this instruction
+    self.register_manager.getRegAssumeFree(src_reg, inst);
+
+    // Track the argument value
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = src_reg }));
+}
+
+fn airUnreachable(self: *CodeGen, inst: Air.Inst.Index) !void {
+    _ = inst;
+    // Generate a trap instruction (BRK or UDF)
+    // BRK #0 will cause a breakpoint exception
+    // Note: BRK uses immediate encoding, but we just emit a simple instruction
+    // The actual immediate value is not critical for a trap
+    try self.addInst(.{
+        .tag = .brk,
+        .ops = .none,
+        .data = .{ .none = {} },
+    });
+}
+
+fn airBitcast(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const operand = try self.resolveInst(ty_op.operand.toIndex().?);
+    const dest_ty = self.typeOfIndex(inst);
+    const src_ty = self.typeOf(ty_op.operand);
+
+    const zcu = self.pt.zcu;
+    const dest_is_float = dest_ty.isRuntimeFloat();
+    const src_is_float = src_ty.isRuntimeFloat();
+
+    // If bitcasting between int and float, need to move between register classes
+    if (dest_is_float != src_is_float) {
+        const dst_reg_class: abi.RegisterClass = if (dest_is_float) .vector else .gp;
+        const dst_reg = try self.register_manager.allocReg(inst, dst_reg_class);
+
+        if (dest_is_float) {
+            // Integer to float register: FMOV Dd, Xn
+            try self.addInst(.{
+                .tag = .fmov,
+                .ops = .rr,
+                .data = .{ .rr = .{
+                    .rd = dst_reg,
+                    .rn = operand.register,
+                } },
+            });
+        } else {
+            // Float to integer register: FMOV Xd, Dn
+            try self.addInst(.{
+                .tag = .fmov,
+                .ops = .rr,
+                .data = .{ .rr = .{
+                    .rd = dst_reg,
+                    .rn = operand.register,
+                } },
+            });
+        }
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+    } else {
+        // Same register class, just track the same value
+        try self.inst_tracking.put(self.gpa, inst, .init(operand));
+    }
 }
 
 fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
