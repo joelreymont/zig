@@ -1027,7 +1027,10 @@ pub fn pread(fd: fd_t, buf: []u8, offset: u64) PReadError!usize {
             .NXIO => return error.Unseekable,
             .SPIPE => return error.Unseekable,
             .OVERFLOW => return error.Unseekable,
-            else => |err| return unexpectedErrno(err),
+            else => |err| {
+                std.debug.print("DEBUG pread: unexpected errno: {s} (fd={}, offset={}, len={})\n", .{ @tagName(err), fd, offset, buf.len });
+                return unexpectedErrno(err);
+            },
         }
     }
 }
@@ -5795,7 +5798,12 @@ pub fn copy_file_range(fd_in: fd_t, off_in: u64, fd_out: fd_t, off_out: u64, len
     }
 
     var buf: [8 * 4096]u8 = undefined;
-    const amt_read = try pread(fd_in, buf[0..@min(buf.len, len)], off_in);
+    std.debug.print("DEBUG copy_file_range fallback: fd_in={}, off_in={}, len={}\n", .{ fd_in, off_in, len });
+    const amt_read = pread(fd_in, buf[0..@min(buf.len, len)], off_in) catch |err| {
+        std.debug.print("DEBUG copy_file_range: pread failed with error: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    std.debug.print("DEBUG copy_file_range: pread returned {} bytes\n", .{amt_read});
     if (amt_read == 0) return 0;
     return pwrite(fd_out, buf[0..amt_read], off_out);
 }
