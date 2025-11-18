@@ -3946,18 +3946,353 @@ fn airSliceLen(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 
 fn airMemset(self: *CodeGen, inst: Air.Inst.Index) !void {
-    // Memset requires loop generation and optimal instruction selection
-    // For now, mark as a call to external memset (linker will resolve)
-    // TODO: Implement inline loop for small sizes
-    _ = inst;
-    return self.fail("TODO: memset requires loop generation - use external memset for now", .{});
+    const pt = self.pt;
+    const zcu = pt.zcu;
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+
+    const dest_ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const value = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    const dest_ty = self.typeOf(bin_op.lhs);
+    _ = self.typeOf(bin_op.rhs);
+
+    // Get the length - for slices it's in the second element
+    const len_mcv = switch (dest_ty.ptrSize(zcu)) {
+        .slice => blk: {
+            // Slice is {ptr, len} - we need the length
+            switch (dest_ptr) {
+                .register_pair => |regs| break :blk MCValue{ .register = regs[1] },
+                else => return self.fail("TODO: memset with slice not in register pair", .{}),
+            }
+        },
+        .one => blk: {
+            // Pointer to array - get compile-time length
+            const array_ty = dest_ty.childType(zcu);
+            const len = array_ty.arrayLen(zcu);
+            break :blk MCValue{ .immediate = len };
+        },
+        else => return self.fail("TODO: memset with pointer size {}", .{dest_ty.ptrSize(zcu)}),
+    };
+
+    // Get destination pointer register
+    const dest_reg = switch (dest_ptr) {
+        .register => |reg| reg,
+        .register_pair => |regs| regs[0], // First element is the pointer
+        else => return self.fail("TODO: memset with dest type {}", .{dest_ptr}),
+    };
+
+    // Get value to set (should be u8)
+    const value_reg = switch (value) {
+        .register => |reg| reg,
+        .immediate => |imm| blk: {
+            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            defer self.register_manager.freeReg(temp);
+
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{
+                    .rd = temp,
+                    .imm = @intCast(imm & 0xFF),
+                } },
+            });
+            break :blk temp;
+        },
+        else => return self.fail("TODO: memset with value type {}", .{value}),
+    };
+
+    // For compile-time known small lengths, unroll
+    if (len_mcv == .immediate and len_mcv.immediate <= 32) {
+        const len: u64 = len_mcv.immediate;
+        var offset: i32 = 0;
+
+        while (offset < len) : (offset += 1) {
+            try self.addInst(.{
+                .tag = .strb,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(dest_reg, offset),
+                    .rs = value_reg,
+                } },
+            });
+        }
+    } else {
+        // Runtime length or large size - use loop with byte stores
+        // Loop counter
+        const counter = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        defer self.register_manager.freeReg(counter);
+
+        const len_reg = switch (len_mcv) {
+            .register => |reg| reg,
+            .immediate => |imm| blk: {
+                const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(temp);
+
+                try self.addInst(.{
+                    .tag = .movz,
+                    .ops = .ri,
+                    .data = .{ .ri = .{
+                        .rd = temp,
+                        .imm = @intCast(imm & 0xFFFF),
+                    } },
+                });
+                break :blk temp;
+            },
+            else => return self.fail("Invalid length MCValue", .{}),
+        };
+
+        // MOV counter, #0
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = counter,
+                .imm = 0,
+            } },
+        });
+
+        // Loop start
+        const loop_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+
+        // STR value, [dest, counter]
+        try self.addInst(.{
+            .tag = .strb,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = .{ .base = dest_reg, .offset = .{ .register = .{ .reg = counter, .shift = 0 } } },
+                .rs = value_reg,
+            } },
+        });
+
+        // ADD counter, counter, #1
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = counter,
+                .rn = counter,
+                .imm = 1,
+            } },
+        });
+
+        // CMP counter, len
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rn = counter,
+                .rd = len_reg,
+            } },
+        });
+
+        // B.LT loop_start
+        try self.addInst(.{
+            .tag = .b_cond,
+            .ops = .rel,
+            .data = .{ .rc = .{
+                .rn = .xzr,
+                .cond = .lt,
+                .target = loop_start,
+            } },
+        });
+    }
+
+    // memset doesn't produce a result value
 }
 
 fn airMemcpy(self: *CodeGen, inst: Air.Inst.Index) !void {
-    // Memcpy requires loop generation and optimal instruction selection
-    // based on size and alignment (LDP/STP for bulk copies)
-    _ = inst;
-    return self.fail("TODO: memcpy requires loop generation and bulk load/store implementation", .{});
+    const pt = self.pt;
+    const zcu = pt.zcu;
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+
+    const dest_ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const source_ptr = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    const dest_ty = self.typeOf(bin_op.lhs);
+    _ = self.typeOf(bin_op.rhs);
+
+    // Get the length - for slices it's in the second element
+    const len_mcv = switch (dest_ty.ptrSize(zcu)) {
+        .slice => blk: {
+            // Slice is {ptr, len} - we need the length
+            switch (dest_ptr) {
+                .register_pair => |regs| break :blk MCValue{ .register = regs[1] },
+                else => return self.fail("TODO: memcpy with slice not in register pair", .{}),
+            }
+        },
+        .one => blk: {
+            // Pointer to array - get compile-time length
+            const array_ty = dest_ty.childType(zcu);
+            const len = array_ty.arrayLen(zcu);
+            break :blk MCValue{ .immediate = len };
+        },
+        else => return self.fail("TODO: memcpy with pointer size {}", .{dest_ty.ptrSize(zcu)}),
+    };
+
+    // Get destination pointer register
+    const dest_reg = switch (dest_ptr) {
+        .register => |reg| reg,
+        .register_pair => |regs| regs[0], // First element is the pointer
+        else => return self.fail("TODO: memcpy with dest type {}", .{dest_ptr}),
+    };
+
+    // Get source pointer register
+    const source_reg = switch (source_ptr) {
+        .register => |reg| reg,
+        .register_pair => |regs| regs[0], // First element is the pointer
+        else => return self.fail("TODO: memcpy with source type {}", .{source_ptr}),
+    };
+
+    // For compile-time known small lengths, unroll
+    if (len_mcv == .immediate and len_mcv.immediate <= 32) {
+        const len: u64 = len_mcv.immediate;
+        var offset: i32 = 0;
+
+        // Use 8-byte copies where possible, then 4-byte, then 1-byte
+        while (offset + 8 <= len) : (offset += 8) {
+            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            defer self.register_manager.freeReg(temp);
+
+            // LDR temp, [source, #offset]
+            try self.addInst(.{
+                .tag = .ldr,
+                .ops = .rm,
+                .data = .{ .rm = .{
+                    .rd = temp,
+                    .mem = Memory.simple(source_reg, offset),
+                } },
+            });
+
+            // STR temp, [dest, #offset]
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(dest_reg, offset),
+                    .rs = temp,
+                } },
+            });
+        }
+
+        // Handle remaining bytes
+        while (offset < len) : (offset += 1) {
+            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            defer self.register_manager.freeReg(temp);
+
+            // LDRB temp, [source, #offset]
+            try self.addInst(.{
+                .tag = .ldrb,
+                .ops = .rm,
+                .data = .{ .rm = .{
+                    .rd = temp,
+                    .mem = Memory.simple(source_reg, offset),
+                } },
+            });
+
+            // STRB temp, [dest, #offset]
+            try self.addInst(.{
+                .tag = .strb,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(dest_reg, offset),
+                    .rs = temp,
+                } },
+            });
+        }
+    } else {
+        // Runtime length or large size - use loop
+        const counter = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        defer self.register_manager.freeReg(counter);
+
+        const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        defer self.register_manager.freeReg(temp);
+
+        const len_reg = switch (len_mcv) {
+            .register => |reg| reg,
+            .immediate => |imm| blk: {
+                const t = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(t);
+
+                try self.addInst(.{
+                    .tag = .movz,
+                    .ops = .ri,
+                    .data = .{ .ri = .{
+                        .rd = t,
+                        .imm = @intCast(imm & 0xFFFF),
+                    } },
+                });
+                break :blk t;
+            },
+            else => return self.fail("Invalid length MCValue", .{}),
+        };
+
+        // MOV counter, #0
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = counter,
+                .imm = 0,
+            } },
+        });
+
+        // Loop start
+        const loop_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+
+        // LDRB temp, [source, counter]
+        try self.addInst(.{
+            .tag = .ldrb,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = temp,
+                .mem = .{ .base = source_reg, .offset = .{ .register = .{ .reg = counter, .shift = 0 } } },
+            } },
+        });
+
+        // STRB temp, [dest, counter]
+        try self.addInst(.{
+            .tag = .strb,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = .{ .base = dest_reg, .offset = .{ .register = .{ .reg = counter, .shift = 0 } } },
+                .rs = temp,
+            } },
+        });
+
+        // ADD counter, counter, #1
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = counter,
+                .rn = counter,
+                .imm = 1,
+            } },
+        });
+
+        // CMP counter, len
+        try self.addInst(.{
+            .tag = .cmp,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rn = counter,
+                .rd = len_reg,
+            } },
+        });
+
+        // B.LT loop_start
+        try self.addInst(.{
+            .tag = .b_cond,
+            .ops = .rel,
+            .data = .{ .rc = .{
+                .rn = .xzr,
+                .cond = .lt,
+                .target = loop_start,
+            } },
+        });
+    }
+
+    // memcpy doesn't produce a result value
 }
 
 fn airAtomicLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
