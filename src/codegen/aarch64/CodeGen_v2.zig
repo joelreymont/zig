@@ -1868,9 +1868,126 @@ fn airWrapOptional(self: *CodeGen, inst: Air.Inst.Index) !void {
         try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
     } else {
         // For tag-based optionals, need to store payload + set tag to 1
-        // This typically requires stack allocation
-        // For now, simplified: just return payload and mark as TODO
-        return self.fail("TODO: wrap_optional for tag-based optionals requires stack allocation", .{});
+        const payload_ty = opt_ty.optionalChild(zcu);
+        const payload_abi_size: u32 = @intCast(payload_ty.abiSize(zcu));
+        const payload_abi_align: u32 = @intCast(payload_ty.abiAlignment(zcu).toByteUnits().?);
+
+        // Allocate stack space for optional (payload + tag byte)
+        // Align the stack allocation
+        const stack_offset = std.mem.alignForward(u32, self.max_stack_size, payload_abi_align);
+        const opt_abi_size: u32 = @intCast(opt_ty.abiSize(zcu));
+        self.max_stack_size = stack_offset + opt_abi_size;
+
+        // Get stack pointer for this allocation
+        const stack_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        defer self.register_manager.freeReg(stack_reg);
+
+        // Calculate address: SP + offset
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = stack_reg,
+                .rn = .sp,
+                .imm = @intCast(stack_offset),
+            } },
+        });
+
+        // Store payload at offset 0
+        const payload_reg = switch (payload) {
+            .register => |reg| reg,
+            .immediate => |imm| blk: {
+                const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(temp);
+
+                try self.addInst(.{
+                    .tag = .movz,
+                    .ops = .ri,
+                    .data = .{ .ri = .{
+                        .rd = temp,
+                        .imm = @intCast(imm & 0xFFFF),
+                    } },
+                });
+                break :blk temp;
+            },
+            else => return self.fail("TODO: wrap_optional with payload type {}", .{payload}),
+        };
+
+        // Store payload based on size
+        if (payload_abi_size == 8) {
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(stack_reg, 0),
+                    .rs = payload_reg,
+                } },
+            });
+        } else if (payload_abi_size == 4) {
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(stack_reg, 0),
+                    .rs = payload_reg,
+                } },
+            });
+        } else if (payload_abi_size == 2) {
+            try self.addInst(.{
+                .tag = .strh,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(stack_reg, 0),
+                    .rs = payload_reg,
+                } },
+            });
+        } else if (payload_abi_size == 1) {
+            try self.addInst(.{
+                .tag = .strb,
+                .ops = .mr,
+                .data = .{ .mr = .{
+                    .mem = Memory.simple(stack_reg, 0),
+                    .rs = payload_reg,
+                } },
+            });
+        } else {
+            return self.fail("TODO: wrap_optional with payload size {}", .{payload_abi_size});
+        }
+
+        // Store tag = 1 at offset payload_abi_size
+        const tag_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        defer self.register_manager.freeReg(tag_reg);
+
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = tag_reg,
+                .imm = 1,
+            } },
+        });
+
+        try self.addInst(.{
+            .tag = .strb,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = Memory.simple(stack_reg, @intCast(payload_abi_size)),
+                .rs = tag_reg,
+            } },
+        });
+
+        // Return stack pointer as the result
+        const dst_reg = try self.register_manager.allocReg(inst, .gp);
+        try self.addInst(.{
+            .tag = .mov,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = dst_reg,
+                .rn = stack_reg,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
     }
 }
 
@@ -1977,11 +2094,132 @@ fn airUnwrapErrUnionErr(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 
 fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
-    _ = inst;
-    // Wrapping a payload in an error union requires creating the struct
-    // with error = 0 and payload = value
-    // This typically requires stack allocation
-    return self.fail("TODO: wrap_errunion_payload requires stack allocation and struct creation", .{});
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const err_union_ty = ty_op.ty.toType();
+    const payload = try self.resolveInst(ty_op.operand.toIndex().?);
+    const zcu = self.pt.zcu;
+
+    const payload_ty = err_union_ty.errorUnionPayload(zcu);
+    const payload_abi_size: u32 = @intCast(payload_ty.abiSize(zcu));
+    const payload_abi_align: u32 = @intCast(payload_ty.abiAlignment(zcu).toByteUnits().?);
+
+    const err_off: i32 = @intCast(codegen.errUnionErrorOffset(payload_ty, zcu));
+
+    // Allocate stack space for error union (payload + error u16)
+    const stack_offset = std.mem.alignForward(u32, self.max_stack_size, payload_abi_align);
+    const err_union_abi_size: u32 = @intCast(err_union_ty.abiSize(zcu));
+    self.max_stack_size = stack_offset + err_union_abi_size;
+
+    // Get stack pointer for this allocation
+    const stack_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    defer self.register_manager.freeReg(stack_reg);
+
+    // Calculate address: SP + offset
+    try self.addInst(.{
+        .tag = .add,
+        .ops = .rri,
+        .data = .{ .rri = .{
+            .rd = stack_reg,
+            .rn = .sp,
+            .imm = @intCast(stack_offset),
+        } },
+    });
+
+    // Store payload
+    const payload_reg = switch (payload) {
+        .register => |reg| reg,
+        .immediate => |imm| blk: {
+            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            defer self.register_manager.freeReg(temp);
+
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{
+                    .rd = temp,
+                    .imm = @intCast(imm & 0xFFFF),
+                } },
+            });
+            break :blk temp;
+        },
+        else => return self.fail("TODO: wrap_errunion_payload with payload type {}", .{payload}),
+    };
+
+    // Store payload based on size
+    if (payload_abi_size == 8) {
+        try self.addInst(.{
+            .tag = .str,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = Memory.simple(stack_reg, 0),
+                .rs = payload_reg,
+            } },
+        });
+    } else if (payload_abi_size == 4) {
+        try self.addInst(.{
+            .tag = .str,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = Memory.simple(stack_reg, 0),
+                .rs = payload_reg,
+            } },
+        });
+    } else if (payload_abi_size == 2) {
+        try self.addInst(.{
+            .tag = .strh,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = Memory.simple(stack_reg, 0),
+                .rs = payload_reg,
+            } },
+        });
+    } else if (payload_abi_size == 1) {
+        try self.addInst(.{
+            .tag = .strb,
+            .ops = .mr,
+            .data = .{ .mr = .{
+                .mem = Memory.simple(stack_reg, 0),
+                .rs = payload_reg,
+            } },
+        });
+    } else {
+        return self.fail("TODO: wrap_errunion_payload with payload size {}", .{payload_abi_size});
+    }
+
+    // Store error = 0 at error offset (error is u16)
+    const err_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    defer self.register_manager.freeReg(err_reg);
+
+    try self.addInst(.{
+        .tag = .movz,
+        .ops = .ri,
+        .data = .{ .ri = .{
+            .rd = err_reg,
+            .imm = 0,
+        } },
+    });
+
+    try self.addInst(.{
+        .tag = .strh,
+        .ops = .mr,
+        .data = .{ .mr = .{
+            .mem = Memory.simple(stack_reg, err_off),
+            .rs = err_reg,
+        } },
+    });
+
+    // Return stack pointer as the result
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+    try self.addInst(.{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = stack_reg,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
 
 fn airIsErrPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_err: bool) !void {
@@ -3812,10 +4050,53 @@ fn airGetUnionTag(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 
 fn airSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
-    // Creating a slice requires allocating stack space for the {ptr, len} struct
-    // This requires proper stack frame management which is not fully implemented yet
-    _ = inst;
-    return self.fail("TODO: airSlice requires stack allocation and frame management", .{});
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+    const ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const len = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    // Slices are represented as register pairs: {ptr, len}
+    // Allocate two registers for the slice
+    const ptr_reg = switch (ptr) {
+        .register => |reg| reg,
+        else => blk: {
+            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            // Move the value to a register
+            switch (ptr) {
+                .immediate => |imm| {
+                    try self.addInst(.{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{
+                            .rd = temp,
+                            .imm = @intCast(imm & 0xFFFF),
+                        } },
+                    });
+                },
+                else => return self.fail("TODO: airSlice with ptr type {}", .{ptr}),
+            }
+            break :blk temp;
+        },
+    };
+
+    const len_reg = switch (len) {
+        .register => |reg| reg,
+        .immediate => |imm| blk: {
+            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{
+                    .rd = temp,
+                    .imm = @intCast(imm & 0xFFFF),
+                } },
+            });
+            break :blk temp;
+        },
+        else => return self.fail("TODO: airSlice with len type {}", .{len}),
+    };
+
+    // Track the slice as a register pair
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register_pair = .{ ptr_reg, len_reg } }));
 }
 
 fn airPtrAdd(self: *CodeGen, inst: Air.Inst.Index) !void {
