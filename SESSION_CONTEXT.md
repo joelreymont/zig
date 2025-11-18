@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-0e079f7e - Add type-based signedness detection for atomic max/min operations
+387de2e9 - Enable atomic and memory operation tests for ARM64 backend
 
 ## Session Status: ACTIVE
 
@@ -77,14 +77,14 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 #### Priority 2: Data Structure Support ✅ COMPLETE
 #### Priority 3: Extended Atomic Operations ✅ COMPLETE
 
-### Phase 3: Optimization & Testing - 0% Complete
+### Phase 3: Optimization & Testing - IN PROGRESS
 
-#### Testing
-- Write comprehensive test suite following existing patterns
-- Test all overflow operations
-- Test all atomic operations
-- Test function calls (direct, indirect, via memory)
-- Test memory operations when implemented
+#### Testing (Started)
+- ✅ Enabled existing atomic tests for ARM64 (removed 12 skip conditions)
+- ✅ Enabled existing memcpy/memset tests for ARM64 (removed 3 skip conditions)
+- 🔄 Running tests reveals additional TODOs - edge cases to implement
+- Tests include: cmpxchg, atomicrmw (Add/Sub/And/Nand/Or/Xor/Max/Min), atomic load/store
+- Comprehensive coverage: signed/unsigned integers (8/16/32/64-bit)
 
 #### Optimization
 - Register allocation improvements
@@ -129,16 +129,19 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 
 ## Statistics
 
-### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e)
+### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9)
 - Lines added: ~1010
 - Lines modified: ~65
+- Lines removed (test skips): 15
 - TODOs resolved: 12
 - Build: SUCCESSFUL
+- Tests enabled: 15 (atomics + memcpy + memset)
 
 ### Cumulative Progress
-- Total commits: 52
+- Total commits: 55
 - Implementation: 100+ AIR instructions
 - Coverage: 100% of Phase 2 (Advanced Features COMPLETE)
+- Phase 3: Testing infrastructure enabled
 - Build: SUCCESSFUL
 
 ## Next Steps (in order of priority)
