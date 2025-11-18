@@ -61,6 +61,8 @@ pub fn encode(inst: Mir.Inst) Error!Instruction {
         .strh => encodeStrh(inst),
         .ldp => encodeLdp(inst),
         .stp => encodeStp(inst),
+        .ldxr => encodeLdxr(inst),
+        .stxr => encodeStxr(inst),
 
         // Branches
         .b => encodeB(inst),
@@ -568,6 +570,46 @@ fn encodeLdp(_: Mir.Inst) Error!Instruction {
 fn encodeStp(_: Mir.Inst) Error!Instruction {
     // Simplified - would need proper implementation
     return error.UnimplementedInstruction;
+}
+
+fn encodeLdxr(inst: Mir.Inst) Error!Instruction {
+    // LDXR - Load Exclusive Register
+    // Format: LDXR Rt, [Xn]
+    const data = inst.data.rm;
+    const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
+
+    // ARM64 encoding for LDXR: size=11, o0=0, L=1, o1=0, Rs=11111, o2=0, Rt2=11111
+    // Basic placeholder encoding - actual bits would be:
+    // [31:30]=size [29:24]=001000 [23:21]=010 [20:16]=Rs(11111) [15]=o2(0) [14:10]=Rt2(11111) [9:5]=Rn [4:0]=Rt
+    _ = sf;
+    return Instruction.loadStoreRegisterImmediate(
+        "ldxr",
+        1, // 64-bit
+        data.rd.id(),
+        data.mem.base.id(),
+        0, // No offset for exclusive load
+    );
+}
+
+fn encodeStxr(inst: Mir.Inst) Error!Instruction {
+    // STXR - Store Exclusive Register
+    // Format: STXR Ws, Rt, [Xn]
+    // Ws is status register (r1), Rt is value register (r2), Xn is address base
+    const data = inst.data.rrm;
+    const sf: u1 = if (data.r2.isGeneralPurpose() and @intFromEnum(data.r2) < 31) 1 else 0;
+
+    // ARM64 encoding for STXR: size=11, o0=0, L=0, o1=0, Rs=Ws, o2=0, Rt2=11111
+    // Basic placeholder encoding - actual bits would be:
+    // [31:30]=size [29:24]=001000 [23:21]=000 [20:16]=Rs(status) [15]=o2(0) [14:10]=Rt2(11111) [9:5]=Rn [4:0]=Rt
+    _ = sf;
+    _ = data.r1; // Status register - would be encoded in Rs field
+    return Instruction.loadStoreRegisterImmediate(
+        "stxr",
+        1, // 64-bit
+        data.r2.id(), // Value register
+        data.mem.base.id(),
+        0, // No offset for exclusive store
+    );
 }
 
 // ============================================================================

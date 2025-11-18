@@ -317,6 +317,10 @@ pub const Inst = struct {
         swp,
         /// CAS - Compare and swap
         cas,
+        /// LDXR - Load exclusive register
+        ldxr,
+        /// STXR - Store exclusive register
+        stxr,
 
         // ============================================================================
         // Floating Point

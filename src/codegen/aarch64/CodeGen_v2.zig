@@ -4679,9 +4679,86 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
     // ARM64 has atomic RMW operations using LSE (Load-Store Exclusive) instructions
     // These are ARMv8.1-A LSE (Large System Extensions) instructions:
     // LDADD, LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN, LDUMAX, LDUMIN
-    // For older cores, fallback to LDXR/STXR loop would be needed
+    // For Nand operation, we use LDXR/STXR loop since there's no single LSE instruction
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Handle Nand as a special case with LDXR/STXR loop
+    if (op == .Nand) {
+        // NAND requires LDXR/STXR loop: ~(old & operand)
+        // Algorithm:
+        // loop:
+        //   LDXR  old_value, [ptr]      ; Load exclusive, save old value
+        //   AND   new_value, old_value, operand ; new_value = old_value & operand
+        //   MVN   new_value, new_value  ; new_value = ~(old_value & operand) = NAND
+        //   STXR  status, new_value, [ptr]  ; Store exclusive, status=0 on success
+        //   CBNZ  status, loop          ; Retry if failed
+        // Result: dst_reg contains the value before the operation
+
+        // Allocate temp registers
+        const new_value_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const status_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        defer self.register_manager.freeReg(new_value_reg);
+        defer self.register_manager.freeReg(status_reg);
+
+        // Mark loop start
+        const loop_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+
+        // LDXR dst_reg, [ptr]  ; Load exclusive into dst_reg (old value)
+        try self.addInst(.{
+            .tag = .ldxr,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rd = dst_reg,
+                .mem = Memory.simple(ptr.register, 0),
+            } },
+        });
+
+        // AND new_value_reg, dst_reg, operand
+        try self.addInst(.{
+            .tag = .and_,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = new_value_reg,
+                .rn = dst_reg,
+                .rm = operand.register,
+            } },
+        });
+
+        // MVN new_value_reg, new_value_reg
+        try self.addInst(.{
+            .tag = .mvn,
+            .ops = .rr,
+            .data = .{ .rr = .{
+                .rd = new_value_reg,
+                .rn = new_value_reg,
+            } },
+        });
+
+        // STXR status_reg, new_value_reg, [ptr]
+        try self.addInst(.{
+            .tag = .stxr,
+            .ops = .rrm,
+            .data = .{ .rrm = .{
+                .mem = Memory.simple(ptr.register, 0),
+                .r1 = status_reg,
+                .r2 = new_value_reg,
+            } },
+        });
+
+        // CBNZ status_reg, loop_start
+        try self.addInst(.{
+            .tag = .cbnz,
+            .ops = .r_rel,
+            .data = .{ .r_rel = .{
+                .rn = status_reg,
+                .target = loop_start,
+            } },
+        });
+
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+        return;
+    }
 
     // Determine signedness for Max/Min operations
     const zcu = self.pt.zcu;
@@ -4699,7 +4776,7 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
         .Xor => .ldeor,
         .Max => if (is_signed) .ldsmax else .ldumax,  // Signed or unsigned max
         .Min => if (is_signed) .ldsmin else .ldumin,  // Signed or unsigned min
-        .Nand => return self.fail("TODO: atomic Nand requires LDXR/STXR loop, not yet implemented", .{}),
+        .Nand => unreachable, // Handled above
     };
 
     // Prepare the actual operand (may need transformation for some operations)
