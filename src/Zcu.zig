@@ -4275,11 +4275,16 @@ pub fn typeFileScope(zcu: *Zcu, ty_index: InternPool.Index) *File {
         .enum_type => blk: {
             const enum_type = ip.loadEnumType(ty_index);
             // Enum types should always have a zir_index for user-defined enums
-            break :blk enum_type.zir_index.unwrap() orelse unreachable;
+            break :blk enum_type.zir_index.unwrap() orelse {
+                @panic("typeFileScope called on enum without zir_index");
+            };
         },
         .opaque_type => ip.loadOpaqueType(ty_index).zir_index,
         // Only container types should be passed to typeFileScope
-        else => unreachable,
+        else => |key| {
+            std.debug.print("typeFileScope called on unexpected type: {s}\n", .{@tagName(key)});
+            @panic("typeFileScope called on non-container type");
+        },
     };
     // Resolve the tracked instruction to get the file
     return zcu.fileByIndex(zir_index.resolveFile(ip));
