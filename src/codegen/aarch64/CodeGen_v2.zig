@@ -763,7 +763,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
 
         // Load/Store
         .load => self.airLoad(inst),
-        .store => self.airStore(inst),
+        .store => self.airStore(inst, false),
+        .store_safe => self.airStore(inst, true),
 
         // Memory operations
         .memset => self.airMemset(inst),
@@ -784,11 +785,15 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Branches
         .br => self.airBr(inst),
         .cond_br => self.airCondBr(inst),
+        .switch_br => self.airSwitchBr(inst),
+        .loop_switch_br => self.airLoopSwitchBr(inst),
 
         // Return
-        .ret => self.airRet(inst),
+        .ret => self.airRet(inst, false),
+        .ret_safe => self.airRet(inst, true),
         .ret_load => self.airRetLoad(inst),
         .ret_ptr => self.airRetPtr(inst),
+        .ret_addr => self.airRetAddr(inst),
 
         // Function calls
         .call, .call_always_tail, .call_never_tail, .call_never_inline => self.airCall(inst),
@@ -851,6 +856,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
 
         // Blocks
         .block => self.airBlock(inst),
+        .loop => self.airLoop(inst),
 
         // Function arguments
         .arg => self.airArg(inst),
@@ -861,6 +867,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
 
         // Bitcast
         .bitcast => self.airBitcast(inst),
+
+        // Inline assembly
+        .assembly => self.airAsm(inst),
 
         // Atomic operations
         .atomic_load => self.airAtomicLoad(inst),
@@ -1144,7 +1153,13 @@ fn airLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
 }
 
-fn airStore(self: *CodeGen, inst: Air.Inst.Index) !void {
+fn airStore(self: *CodeGen, inst: Air.Inst.Index, safety: bool) !void {
+    if (safety) {
+        // TODO if the value is undef, write 0xaa bytes to dest
+    } else {
+        // TODO if the value is undef, don't lower this instruction
+    }
+
     const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
     const ptr = try self.resolveInst(bin_op.lhs.toIndex().?);
     const val = try self.resolveInst(bin_op.rhs.toIndex().?);
@@ -2628,8 +2643,11 @@ fn airCondBr(self: *CodeGen, inst: Air.Inst.Index) !void {
     self.mir_instructions.items(.data)[skip_else_branch].rel.target = after_else;
 }
 
-fn airRet(self: *CodeGen, inst: Air.Inst.Index) !void {
+fn airRet(self: *CodeGen, inst: Air.Inst.Index, safety: bool) !void {
     _ = inst;
+    if (safety) {
+        // TODO: runtime safety check for return value
+    }
 
     // TODO: Move return value to appropriate register(s) if needed
 
@@ -2644,6 +2662,54 @@ fn airRetLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     // Generate epilogue and return
     try self.genEpilogue();
+}
+
+fn airRetAddr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const dst_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Return address is stored in X30 (LR register)
+    // Copy it to destination register
+    try self.addInst(.{
+        .tag = .mov,
+        .ops = .rr,
+        .data = .{ .rr = .{
+            .rd = dst_reg,
+            .rn = .x30, // Link register
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airLoop(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const loop = self.air.extraData(Air.Block, ty_pl.payload);
+    const body: []const Air.Inst.Index = @ptrCast(self.air.extra.items[loop.end..][0..loop.data.body_len]);
+
+    // Mark the loop start position for backward jumps
+    const loop_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+
+    // Process loop body
+    try self.genBody(body);
+
+    // The repeat instruction in the body will jump back to loop_start
+    // Store loop_start for use by repeat instructions
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .immediate = loop_start }));
+}
+
+fn airSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    _ = inst;
+    return self.fail("TODO: ARM64 CodeGen switch_br", .{});
+}
+
+fn airLoopSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
+    _ = inst;
+    return self.fail("TODO: ARM64 CodeGen loop_switch_br", .{});
+}
+
+fn airAsm(self: *CodeGen, inst: Air.Inst.Index) !void {
+    _ = inst;
+    return self.fail("TODO: ARM64 CodeGen inline assembly", .{});
 }
 
 fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
