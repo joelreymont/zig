@@ -14,6 +14,8 @@ const Zcu = @import("../../Zcu.zig");
 
 const Instruction = encoding.Instruction;
 
+const log = std.log.scoped(.codegen);
+
 allocator: Allocator,
 mir: Mir,
 cc: std.builtin.CallingConvention,
@@ -60,6 +62,8 @@ pub const Relocation = struct {
 pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow, InvalidImmediate, InvalidOperands, InvalidRegister, PseudoInstruction, UnimplementedInstruction }!void {
     const gpa = self.allocator;
 
+    log.debug("=== ARM64 Lower: Starting MIR lowering with {d} instructions ===", .{self.mir.instructions.len});
+
     // First pass: count instructions and build branch target map
     try self.branch_targets.ensureTotalCapacity(gpa, @intCast(self.mir.instructions.len));
 
@@ -75,16 +79,24 @@ pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow, Invalid
         self.branch_targets.putAssumeCapacity(mir_index, @intCast(self.instructions.items.len));
     }
 
+    log.debug("ARM64 Lower: Branch target map built, starting instruction lowering", .{});
+
     // Second pass: generate instructions
-    for (self.mir.instructions.items(.tag), 0..) |_, i| {
+    for (self.mir.instructions.items(.tag), 0..) |tag, i| {
         const mir_index: Mir.Inst.Index = @intCast(i);
         const inst = self.mir.instructions.get(mir_index);
 
+        log.debug("ARM64 Lower: Lowering MIR inst {d}: {s}", .{ i, @tagName(tag) });
         try self.lowerInst(inst, mir_index);
     }
 
+    log.debug("ARM64 Lower: Instruction lowering complete, generated {d} instructions", .{self.instructions.items.len});
+
     // Third pass: apply relocations
+    log.debug("ARM64 Lower: Applying relocations", .{});
     try self.applyRelocations();
+
+    log.debug("=== ARM64 Lower: MIR lowering complete ===", .{});
 }
 
 fn isPseudoInstruction(tag: Mir.Inst.Tag) bool {

@@ -14,6 +14,8 @@ const InternPool = @import("../../InternPool.zig");
 
 const Instruction = encoding.Instruction;
 
+const log = std.log.scoped(.codegen);
+
 /// Emit MIR to machine code
 pub fn emitMir(
     mir: Mir,
@@ -31,6 +33,8 @@ pub fn emitMir(
     const mod = zcu.navFileScope(func.owner_nav).mod.?;
     const target = &mod.resolved_target.result;
 
+    log.debug("=== ARM64 Emit: Starting emission for function atom {d} ===", .{atom_index});
+
     // Create lower
     var lower: Lower = .{
         .allocator = gpa,
@@ -39,8 +43,12 @@ pub fn emitMir(
         .src_loc = src_loc,
         .target = target,
     };
-    defer lower.deinit();
+    defer {
+        log.debug("ARM64 Emit: Deinitializing lower", .{});
+        lower.deinit();
+    }
 
+    log.debug("ARM64 Emit: Calling lowerMir()", .{});
     // Lower MIR to machine instructions
     // Convert encoder-specific errors to CodegenFail
     lower.lowerMir() catch |err| switch (err) {
@@ -53,18 +61,23 @@ pub fn emitMir(
         else => |e| return e,
     };
 
+    log.debug("ARM64 Emit: lowerMir complete, writing {d} instructions", .{lower.instructions.items.len});
+
     // Write instructions to output
     const start_offset = w.end;
 
-    for (lower.instructions.items) |inst| {
+    for (lower.instructions.items, 0..) |inst, i| {
         const inst_bits: u32 = @bitCast(inst);
+        log.debug("ARM64 Emit: Writing instruction {d}: 0x{x:0>8}", .{ i, inst_bits });
         try w.writeInt(u32, inst_bits, .little);
     }
 
     const end_offset = w.end;
+    log.debug("ARM64 Emit: Wrote {d} bytes (offset {d} -> {d})", .{ end_offset - start_offset, start_offset, end_offset });
 
     // Generate debug info if requested
     if (debug_output != .none) {
+        log.debug("ARM64 Emit: Generating debug info", .{});
         try emitDebugInfo(
             mir,
             bin_file,
@@ -76,6 +89,8 @@ pub fn emitMir(
             debug_output,
         );
     }
+
+    log.debug("=== ARM64 Emit: Emission complete ===", .{});
 }
 
 /// Emit DWARF debug information

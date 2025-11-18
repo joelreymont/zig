@@ -638,12 +638,12 @@ pub const FrameLoc = struct {
 
 /// Deinitialize and free MIR resources
 pub fn deinit(mir: *@This(), gpa: Allocator) void {
-    gpa.free(mir.instructions.items(.tag));
+    mir.instructions.deinit(gpa);
     gpa.free(mir.extra);
     gpa.free(mir.string_bytes);
     gpa.free(mir.locals);
     gpa.free(mir.table);
-    gpa.free(mir.frame_locs.items(.index));
+    mir.frame_locs.deinit(gpa);
     mir.* = undefined;
 }
 
