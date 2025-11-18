@@ -37,4 +37,5 @@ zig-cache/
 /build_stack_tracking2.log
 /build_stack_tracking3.log
 /build_final.log
+/build_atomic.log
 /compiler_rt.c
