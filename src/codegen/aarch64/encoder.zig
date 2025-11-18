@@ -129,6 +129,72 @@ pub const Error = error{
 };
 
 // ============================================================================
+// Atomic Instruction Packed Structs (ARMv8.1-A LSE + Exclusive Load/Store)
+// ============================================================================
+
+/// Load Exclusive Register - LDXR Xt, [Xn]
+/// ARM64 Reference Manual C6.2.146
+const LoadExclusive = packed struct(u32) {
+    Rt: u5,          // [4:0] Destination register
+    Rn: u5,          // [9:5] Base address register
+    Rt2: u5 = 0b11111, // [14:10] Reserved (must be 11111)
+    o0: u1 = 0,      // [15] Ordered flag
+    Rs: u5 = 0b11111,  // [20:16] Reserved (must be 11111 for load)
+    o1: u1 = 0,      // [21] Ordered flag
+    L: u1 = 1,       // [22] Load (1) vs Store (0)
+    o2: u1 = 0,      // [23] Ordered flag
+    fixed: u6 = 0b001000, // [29:24] Fixed bits
+    size: u2 = 0b11, // [31:30] Size (11=64-bit)
+};
+
+/// Store Exclusive Register - STXR Ws, Xt, [Xn]
+/// ARM64 Reference Manual C6.2.303
+const StoreExclusive = packed struct(u32) {
+    Rt: u5,          // [4:0] Value register
+    Rn: u5,          // [9:5] Base address register
+    Rt2: u5 = 0b11111, // [14:10] Reserved (must be 11111)
+    o0: u1 = 0,      // [15] Ordered flag
+    Rs: u5,          // [20:16] Status register (Ws)
+    o1: u1 = 0,      // [21] Ordered flag
+    L: u1 = 0,       // [22] Load (1) vs Store (0)
+    o2: u1 = 0,      // [23] Ordered flag
+    fixed: u6 = 0b001000, // [29:24] Fixed bits
+    size: u2 = 0b11, // [31:30] Size (11=64-bit)
+};
+
+/// LSE Atomic Memory Operation - LDADD, LDCLR, LDEOR, LDSET, etc.
+/// ARM64 Reference Manual C6.2.131-138
+const AtomicLSE = packed struct(u32) {
+    Rt: u5,          // [4:0] Destination register (receives old value)
+    Rn: u5,          // [9:5] Base address register
+    o3: u2 = 0,      // [11:10] Reserved
+    opc2: u3,        // [14:12] Secondary opcode (0b000 for most, 0b100 for SWP)
+    o4: u1 = 0,      // [15] Reserved
+    Rs: u5,          // [20:16] Source operand register
+    opc: u3,         // [23:21] Primary opcode (selects operation)
+    fixed: u4 = 0b1000, // [27:24] Fixed bits
+    R: u1 = 1,       // [28] Release semantics
+    A: u1 = 1,       // [29] Acquire semantics
+    size: u2 = 0b11, // [31:30] Size (11=64-bit)
+};
+
+/// Compare and Swap - CAS Rs, Rt, [Xn]
+/// ARM64 Reference Manual C6.2.42
+const CompareAndSwap = packed struct(u32) {
+    Rt: u5,          // [4:0] Destination/comparison register
+    Rn: u5,          // [9:5] Base address register
+    o3: u5 = 0b11111, // [14:10] Reserved (must be 11111)
+    L: u1 = 1,       // [15] Load-Acquire
+    Rs: u5,          // [20:16] Source value register
+    o2: u1 = 1,      // [21] Fixed bit
+    o1: u1 = 0,      // [22] Fixed bit
+    o0: u1 = 0,      // [23] Fixed bit
+    fixed: u5 = 0b01000, // [28:24] Fixed bits (001000)
+    R: u1 = 1,       // [29] Release
+    size: u2 = 0b11, // [31:30] Size (11=64-bit)
+};
+
+// ============================================================================
 // Arithmetic Instructions
 // ============================================================================
 
@@ -604,85 +670,53 @@ fn encodeStp(_: Mir.Inst) Error!Instruction {
 fn encodeLdxr(inst: Mir.Inst) Error!Instruction {
     // LDXR - Load Exclusive Register
     // Format: LDXR Xt, [Xn{, #0}]
-    // ARM64 encoding: size=11 001000 0 L=1 0 Rs=11111 o0=0 Rt2=11111 Rn Rt
-    // [31:30]=11 [29:24]=001000 [23]=0 [22]=1 [21]=0 [20:16]=11111 [15]=0 [14:10]=11111 [9:5]=Rn [4:0]=Rt
+    // Uses packed struct with proper field layout
     const data = inst.data.rm;
-    const rt = data.rd.id();
-    const rn = data.mem.base.id();
 
-    const size: u32 = 0b11; // 64-bit
-    const fixed: u32 = 0b001000;
-    const l: u32 = 1; // Load
-    const rs: u32 = 0b11111; // Reserved for exclusive loads
-    const rt2: u32 = 0b11111; // Reserved
+    const ldxr_insn = LoadExclusive{
+        .Rt = data.rd.id(),
+        .Rn = data.mem.base.id(),
+        // All other fields use default values from struct definition
+    };
 
-    const insn: u32 =
-        (size << 30) |
-        (fixed << 24) |
-        (l << 22) |
-        (rs << 16) |
-        (rt2 << 10) |
-        (@as(u32, rn) << 5) |
-        @as(u32, rt);
-
-    return @bitCast(insn);
+    // Bitcast packed struct to Instruction
+    return @bitCast(ldxr_insn);
 }
 
 fn encodeStxr(inst: Mir.Inst) Error!Instruction {
     // STXR - Store Exclusive Register
     // Format: STXR Ws, Xt, [Xn{, #0}]
-    // ARM64 encoding: size=11 001000 0 L=0 0 Rs Rt2=11111 Rn Rt
-    // [31:30]=11 [29:24]=001000 [23]=0 [22]=0 [21]=0 [20:16]=Rs [15]=0 [14:10]=11111 [9:5]=Rn [4:0]=Rt
+    // Uses packed struct with proper field layout
     const data = inst.data.rrm;
-    const ws = data.r1.id(); // Status register (W register, but use id directly)
-    const rt = data.r2.id(); // Value register
-    const rn = data.mem.base.id(); // Address register
 
-    const size: u32 = 0b11; // 64-bit
-    const fixed: u32 = 0b001000;
-    const l: u32 = 0; // Store
-    const rt2: u32 = 0b11111; // Reserved
+    const stxr_insn = StoreExclusive{
+        .Rt = data.r2.id(),  // Value register
+        .Rn = data.mem.base.id(),  // Address register
+        .Rs = data.r1.id(),  // Status register (Ws)
+        // All other fields use default values from struct definition
+    };
 
-    const insn: u32 =
-        (size << 30) |
-        (fixed << 24) |
-        (l << 22) |
-        (@as(u32, ws) << 16) |
-        (rt2 << 10) |
-        (@as(u32, rn) << 5) |
-        @as(u32, rt);
-
-    return @bitCast(insn);
+    // Bitcast packed struct to Instruction
+    return @bitCast(stxr_insn);
 }
 
 fn encodeAtomicLSE(inst: Mir.Inst) Error!Instruction {
     // Atomic LSE (Large System Extensions) instructions
-    // ARM64 encoding: size A=1 R=1 1000 opc Rs 0 Rn Rt
-    // [31:30]=size [29]=A [28]=R [27:24]=1000 [23:21]=opc [20:16]=Rs [15]=0 [14:12]=opc2 [11:10]=00 [9:5]=Rn [4:0]=Rt
-    //
-    // Simplified encoding for acquire-release semantics (A=1, R=1):
-    // LDADD:  opc=000, opc2=000
-    // LDCLR:  opc=001, opc2=000
-    // LDEOR:  opc=010, opc2=000
-    // LDSET:  opc=011, opc2=000
-    // LDSMAX: opc=100, opc2=000
-    // LDSMIN: opc=101, opc2=000
-    // LDUMAX: opc=110, opc2=000
-    // LDUMIN: opc=111, opc2=000
-    // SWP:    opc=000, opc2=100
-    // CAS:    Special encoding (different format)
-
+    // Uses packed structs with proper field layout
     const data = inst.data.rrm;
-    const rs = data.r1.id(); // Source operand
-    const rt = data.r2.id(); // Destination (receives old value)
-    const rn = data.mem.base.id(); // Memory address
 
-    const size: u32 = 0b11; // 64-bit
-    const a: u32 = 1; // Acquire
-    const r: u32 = 1; // Release
-    const fixed: u32 = 0b1000;
+    // CAS has a different encoding pattern - use separate struct
+    if (inst.tag == .cas) {
+        const cas_insn = CompareAndSwap{
+            .Rt = data.r2.id(),  // Destination/comparison register
+            .Rn = data.mem.base.id(),  // Base address
+            .Rs = data.r1.id(),  // Source value register
+            // All other fields use default values from struct definition
+        };
+        return @bitCast(cas_insn);
+    }
 
-    // Determine opcode based on instruction tag
+    // Determine primary opcode based on instruction tag
     const opc: u3 = switch (inst.tag) {
         .ldadd => 0b000,
         .ldclr => 0b001,
@@ -693,39 +727,23 @@ fn encodeAtomicLSE(inst: Mir.Inst) Error!Instruction {
         .ldumax => 0b110,
         .ldumin => 0b111,
         .swp => 0b000, // SWP uses different opc2
-        .cas => 0b000, // CAS has different encoding (handled below)
         else => return error.InvalidOperands,
     };
 
-    // opc2 field distinguishes SWP from LDADD
+    // opc2 field distinguishes SWP from LDADD (both have opc=000)
     const opc2: u3 = if (inst.tag == .swp) 0b100 else 0b000;
 
-    // CAS has a different encoding pattern
-    if (inst.tag == .cas) {
-        // CAS: size 0 0 1000 1 Rs 1 Rn Rt
-        const cas_bits: u32 =
-            (size << 30) |
-            (0b001000 << 24) |
-            (1 << 23) |
-            (@as(u32, rs) << 16) |
-            (1 << 15) |
-            (@as(u32, rn) << 5) |
-            @as(u32, rt);
-        return @bitCast(cas_bits);
-    }
+    const lse_insn = AtomicLSE{
+        .Rt = data.r2.id(),  // Destination (receives old value)
+        .Rn = data.mem.base.id(),  // Memory address
+        .Rs = data.r1.id(),  // Source operand
+        .opc = opc,  // Primary opcode
+        .opc2 = opc2,  // Secondary opcode
+        // A=1, R=1, size=11, fixed=1000 from struct defaults
+    };
 
-    const insn: u32 =
-        (size << 30) |
-        (a << 29) |
-        (r << 28) |
-        (fixed << 24) |
-        (@as(u32, opc) << 21) |
-        (@as(u32, rs) << 16) |
-        (@as(u32, opc2) << 12) |
-        (@as(u32, rn) << 5) |
-        @as(u32, rt);
-
-    return @bitCast(insn);
+    // Bitcast packed struct to Instruction
+    return @bitCast(lse_insn);
 }
 
 // ============================================================================
