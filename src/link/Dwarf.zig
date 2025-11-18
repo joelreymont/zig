@@ -40,6 +40,16 @@ pub const FlushError = UpdateError;
 pub const RelocError =
     std.fs.File.PWriteError;
 
+/// Helper function to safely write to file, extending it if necessary
+fn pwriteAllSafe(file: std.fs.File, contents: []const u8, offset: u64) (std.fs.File.PWriteError || std.fs.File.SetEndPosError)!void {
+    const file_end = file.getEndPos() catch offset + contents.len;
+    if (offset + contents.len > file_end) {
+        std.debug.print("DEBUG Dwarf.pwriteAllSafe: extending file from {} to {}\n", .{ file_end, offset + contents.len });
+        try file.setEndPos(offset + contents.len);
+    }
+    return file.pwriteAll(contents, offset);
+}
+
 pub const AddressSize = enum(u8) {
     @"32" = 4,
     @"64" = 8,
@@ -391,9 +401,19 @@ pub const Section = struct {
                 entry_ptr.prev = unit_ptr.last;
                 unit_ptr.last = entry.toOptional();
                 if (unit_ptr.first == .none) unit_ptr.first = unit_ptr.last;
-                if (entry_ptr.prev.unwrap()) |prev_entry| try unit_ptr.getEntry(prev_entry).pad(unit_ptr, sec, dwarf);
+                if (entry_ptr.prev.unwrap()) |prev_entry| {
+                    std.debug.print("DEBUG resizeEntry: calling pad\n", .{});
+                    unit_ptr.getEntry(prev_entry).pad(unit_ptr, sec, dwarf) catch |err| {
+                        std.debug.print("DEBUG resizeEntry: pad failed: {s}\n", .{@errorName(err)});
+                        return err;
+                    };
+                }
             }
-            try entry_ptr.resize(unit_ptr, sec, dwarf, len);
+            std.debug.print("DEBUG resizeEntry: calling resize (len={})\n", .{len});
+            entry_ptr.resize(unit_ptr, sec, dwarf, len) catch |err| {
+                std.debug.print("DEBUG resizeEntry: resize failed: {s}\n", .{@errorName(err)});
+                return err;
+            };
         }
         assert(entry_ptr.len == len);
     }
@@ -405,9 +425,15 @@ pub const Section = struct {
         dwarf: *Dwarf,
         contents: []const u8,
     ) (UpdateError || Writer.Error)!void {
-        try sec.resizeEntry(unit, entry, dwarf, @intCast(contents.len));
+        sec.resizeEntry(unit, entry, dwarf, @intCast(contents.len)) catch |err| {
+            std.debug.print("DEBUG replaceEntry: resizeEntry failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
         const unit_ptr = sec.getUnit(unit);
-        try unit_ptr.getEntry(entry).replace(unit_ptr, sec, dwarf, contents);
+        unit_ptr.getEntry(entry).replace(unit_ptr, sec, dwarf, contents) catch |err| {
+            std.debug.print("DEBUG replaceEntry: replace failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
     }
 
     fn freeEntry(
@@ -655,7 +681,7 @@ const Unit = struct {
 
     fn replaceHeader(unit: *Unit, sec: *Section, dwarf: *Dwarf, contents: []const u8) UpdateError!void {
         assert(contents.len == unit.header_len);
-        try dwarf.getFile().?.pwriteAll(contents, sec.off(dwarf) + unit.off);
+        try pwriteAllSafe(dwarf.getFile().?, contents, sec.off(dwarf) + unit.off);
     }
 
     fn writeTrailer(unit: *Unit, sec: *Section, dwarf: *Dwarf) UpdateError!void {
@@ -688,7 +714,7 @@ const Unit = struct {
             assert(fw.end == extended_op_bytes + op_len_bytes);
             fw.writeByte(DW.LNE.padding) catch unreachable;
             assert(fw.end >= unit.trailer_len and fw.end <= len);
-            return dwarf.getFile().?.pwriteAll(fw.buffered(), sec.off(dwarf) + start);
+            return pwriteAllSafe(dwarf.getFile().?, fw.buffered(), sec.off(dwarf) + start);
         }
         var trailer_aw: Writer.Allocating = try .initCapacity(dwarf.gpa, len);
         defer trailer_aw.deinit();
@@ -748,7 +774,7 @@ const Unit = struct {
         assert(tw.end == unit.trailer_len);
         tw.splatByteAll(fill_byte, len - unit.trailer_len) catch unreachable;
         assert(tw.end == len);
-        try dwarf.getFile().?.pwriteAll(trailer_aw.written(), sec.off(dwarf) + start);
+        try pwriteAllSafe(dwarf.getFile().?, trailer_aw.written(), sec.off(dwarf) + start);
     }
 
     fn resolveRelocs(unit: *Unit, sec: *Section, dwarf: *Dwarf) RelocError!void {
@@ -843,11 +869,11 @@ const Entry = struct {
             var unit_len_buf: [8]u8 = undefined;
             const unit_len_bytes = unit_len_buf[0..dwarf.sectionOffsetBytes()];
             dwarf.writeInt(unit_len_bytes, len - dwarf.unitLengthBytes());
-            try dwarf.getFile().?.pwriteAll(unit_len_bytes, sec.off(dwarf) + unit.off + unit.header_len + entry.off);
+            try pwriteAllSafe(dwarf.getFile().?, unit_len_bytes, sec.off(dwarf) + unit.off + unit.header_len + entry.off);
             const buf = try dwarf.gpa.alloc(u8, len - entry.len);
             defer dwarf.gpa.free(buf);
             @memset(buf, DW.CFA.nop);
-            try dwarf.getFile().?.pwriteAll(buf, sec.off(dwarf) + unit.off + unit.header_len + start);
+            try pwriteAllSafe(dwarf.getFile().?, buf, sec.off(dwarf) + unit.off + unit.header_len + start);
             return;
         }
         const len = unit.getEntry(entry.next.unwrap() orelse return).off - start;
@@ -906,7 +932,7 @@ const Entry = struct {
             },
         } else assert(!sec.pad_entries_to_ideal and len == 0);
         assert(fw.end <= len);
-        try dwarf.getFile().?.pwriteAll(fw.buffered(), sec.off(dwarf) + unit.off + unit.header_len + start);
+        try pwriteAllSafe(dwarf.getFile().?, fw.buffered(), sec.off(dwarf) + unit.off + unit.header_len + start);
     }
 
     fn resize(
@@ -949,7 +975,17 @@ const Entry = struct {
 
     fn replace(entry_ptr: *Entry, unit: *Unit, sec: *Section, dwarf: *Dwarf, contents: []const u8) UpdateError!void {
         assert(contents.len == entry_ptr.len);
-        try dwarf.getFile().?.pwriteAll(contents, sec.off(dwarf) + unit.off + unit.header_len + entry_ptr.off);
+        const write_offset = sec.off(dwarf) + unit.off + unit.header_len + entry_ptr.off;
+        const file_end = dwarf.getFile().?.getEndPos() catch 0;
+        std.debug.print("DEBUG Dwarf.replace: pwriteAll(offset={}, len={}, file_end={})\n", .{ write_offset, contents.len, file_end });
+        if (write_offset + contents.len > file_end) {
+            std.debug.print("DEBUG Dwarf.replace: WARNING - writing beyond file end! Extending file...\n", .{});
+            dwarf.getFile().?.setEndPos(write_offset + contents.len) catch |err| {
+                std.debug.print("DEBUG Dwarf.replace: setEndPos failed: {s}\n", .{@errorName(err)});
+                return err;
+            };
+        }
+        try dwarf.getFile().?.pwriteAll(contents, write_offset);
         if (false) {
             const buf = try dwarf.gpa.alloc(u8, sec.len);
             defer dwarf.gpa.free(buf);
@@ -3007,17 +3043,34 @@ fn finishWipNavWriterError(
     const nav = ip.getNav(nav_index);
     log.debug("finishWipNav({f})", .{nav.fqn.fmt(ip)});
 
-    try dwarf.debug_info.section.replaceEntry(wip_nav.unit, wip_nav.entry, dwarf, wip_nav.debug_info.written());
+    std.debug.print("DEBUG finishWipNav: calling debug_info replaceEntry\n", .{});
+    dwarf.debug_info.section.replaceEntry(wip_nav.unit, wip_nav.entry, dwarf, wip_nav.debug_info.written()) catch |err| {
+        std.debug.print("DEBUG finishWipNav: debug_info replaceEntry failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
     const dlw = &wip_nav.debug_line.writer;
     if (dlw.end > 0) {
+        std.debug.print("DEBUG finishWipNav: processing debug_line\n", .{});
         try dlw.writeByte(DW.LNS.extended_op);
         try dlw.writeUleb128(1);
         try dlw.writeByte(DW.LNE.end_sequence);
-        try dwarf.debug_line.section.replaceEntry(wip_nav.unit, wip_nav.entry, dwarf, wip_nav.debug_line.written());
+        dwarf.debug_line.section.replaceEntry(wip_nav.unit, wip_nav.entry, dwarf, wip_nav.debug_line.written()) catch |err| {
+            std.debug.print("DEBUG finishWipNav: debug_line replaceEntry failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
     }
-    try dwarf.debug_loclists.section.replaceEntry(wip_nav.unit, wip_nav.entry, dwarf, wip_nav.debug_loclists.written());
+    std.debug.print("DEBUG finishWipNav: calling debug_loclists replaceEntry\n", .{});
+    dwarf.debug_loclists.section.replaceEntry(wip_nav.unit, wip_nav.entry, dwarf, wip_nav.debug_loclists.written()) catch |err| {
+        std.debug.print("DEBUG finishWipNav: debug_loclists replaceEntry failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
 
-    try wip_nav.updateLazy(zcu.navSrcLoc(nav_index));
+    std.debug.print("DEBUG finishWipNav: calling updateLazy\n", .{});
+    wip_nav.updateLazy(zcu.navSrcLoc(nav_index)) catch |err| {
+        std.debug.print("DEBUG finishWipNav: updateLazy failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    std.debug.print("DEBUG finishWipNav: SUCCESS\n", .{});
 }
 
 pub fn updateComptimeNav(dwarf: *Dwarf, pt: Zcu.PerThread, nav_index: InternPool.Nav.Index) error{ OutOfMemory, CodegenFail }!void {
@@ -4696,7 +4749,7 @@ pub fn updateLineNumber(dwarf: *Dwarf, zcu: *Zcu, zir_index: InternPool.TrackedI
 
     const unit = dwarf.debug_info.section.getUnit(dwarf.getUnitIfExists(file.mod.?) orelse return);
     const entry = unit.getEntry(dwarf.decls.get(zir_index) orelse return);
-    try dwarf.getFile().?.pwriteAll(&line_buf, dwarf.debug_info.section.off(dwarf) + unit.off + unit.header_len + entry.off + DebugInfo.declEntryLineOff(dwarf));
+    try pwriteAllSafe(dwarf.getFile().?, &line_buf, dwarf.debug_info.section.off(dwarf) + unit.off + unit.header_len + entry.off + DebugInfo.declEntryLineOff(dwarf));
 }
 
 pub fn freeNav(dwarf: *Dwarf, nav_index: InternPool.Nav.Index) void {
@@ -4952,7 +5005,7 @@ fn flushWriterError(dwarf: *Dwarf, pt: Zcu.PerThread) (FlushError || Writer.Erro
     if (dwarf.debug_str.section.dirty) {
         const contents = dwarf.debug_str.contents.items;
         try dwarf.debug_str.section.resize(dwarf, contents.len);
-        try dwarf.getFile().?.pwriteAll(contents, dwarf.debug_str.section.off(dwarf));
+        try pwriteAllSafe(dwarf.getFile().?, contents, dwarf.debug_str.section.off(dwarf));
         dwarf.debug_str.section.dirty = false;
     }
     if (dwarf.debug_line.section.dirty) {
@@ -5064,7 +5117,7 @@ fn flushWriterError(dwarf: *Dwarf, pt: Zcu.PerThread) (FlushError || Writer.Erro
     if (dwarf.debug_line_str.section.dirty) {
         const contents = dwarf.debug_line_str.contents.items;
         try dwarf.debug_line_str.section.resize(dwarf, contents.len);
-        try dwarf.getFile().?.pwriteAll(contents, dwarf.debug_line_str.section.off(dwarf));
+        try pwriteAllSafe(dwarf.getFile().?, contents, dwarf.debug_line_str.section.off(dwarf));
         dwarf.debug_line_str.section.dirty = false;
     }
     if (dwarf.debug_loclists.section.dirty) {
@@ -6388,7 +6441,7 @@ fn writeInt(dwarf: *Dwarf, buf: []u8, int: u64) void {
 fn resolveReloc(dwarf: *Dwarf, source: u64, target: u64, size: u32) RelocError!void {
     var buf: [8]u8 = undefined;
     dwarf.writeInt(buf[0..size], target);
-    try dwarf.getFile().?.pwriteAll(buf[0..size], source);
+    try pwriteAllSafe(dwarf.getFile().?, buf[0..size], source);
 }
 
 fn unitLengthBytes(dwarf: *Dwarf) u32 {
