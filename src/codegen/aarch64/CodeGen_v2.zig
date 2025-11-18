@@ -379,7 +379,12 @@ fn resolveCallingConventionValues(
             result.return_value = .init(.unreach);
             result.stack_align = .@"16";
         },
-        .auto => {
+        // ARM64 uses AAPCS64 for .auto and the various AAPCS variants
+        .auto,
+        .aarch64_aapcs,
+        .aarch64_aapcs_darwin,
+        .aarch64_aapcs_win,
+        => {
             // AAPCS64 parameter passing rules
             const param_gp_regs = abi.arg_gp_regs;
             var param_gp_index: u32 = 0;
