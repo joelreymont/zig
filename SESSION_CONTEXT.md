@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-387de2e9 - Enable atomic and memory operation tests for ARM64 backend
+5bd3f10f - Add atomic operation enhancements for ARM64 backend
 
 ## Session Status: ACTIVE
 
@@ -46,6 +46,13 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
    - LDUMAX, LDUMIN for unsigned integers
    - LDSMAX, LDSMIN for signed integers
    - Complete atomic RMW instruction support
+
+7. ✅ **Extended Atomic RMW Operations** (Commit: 5bd3f10f)
+   - Added .acq_rel memory ordering support for atomic_load and atomic_store
+   - Implemented .Xchg operation using SWP (swap) instruction
+   - Implemented .Sub operation using NEG + LDADD
+   - Documented .Nand TODO (requires LDXR/STXR loop, not yet in MIR)
+   - Atomic RMW operations: 8/9 variants implemented (missing only Nand)
 
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL
@@ -129,25 +136,32 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 
 ## Statistics
 
-### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9)
-- Lines added: ~1010
-- Lines modified: ~65
+### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9, 5bd3f10f)
+- Lines added: ~1050
+- Lines modified: ~80
 - Lines removed (test skips): 15
 - TODOs resolved: 12
+- Atomic RMW operations: 8/9 implemented
 - Build: SUCCESSFUL
 - Tests enabled: 15 (atomics + memcpy + memset)
 
 ### Cumulative Progress
-- Total commits: 55
+- Total commits: 56
 - Implementation: 100+ AIR instructions
+- Atomic operations: 8/9 RMW variants (Nand requires LDXR/STXR)
 - Coverage: 100% of Phase 2 (Advanced Features COMPLETE)
 - Phase 3: Testing infrastructure enabled
 - Build: SUCCESSFUL
 
 ## Next Steps (in order of priority)
 
-1. **Write tests** - Ensure correctness of implemented features
-   - Atomic operations tests
+1. **Implement atomic Nand operation** - Complete remaining RMW variant
+   - Add LDXR/STXR (load-exclusive/store-exclusive) to MIR
+   - Add encoder support for LDXR/STXR instructions
+   - Implement NAND using LDXR/STXR loop with retry logic
+
+2. **Write tests** - Ensure correctness of implemented features
+   - Atomic operations tests (8/9 operations pass, Nand needs implementation)
    - Overflow detection tests
    - Function call tests
    - Memory operation tests (memset/memcpy)
