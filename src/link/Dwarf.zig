@@ -320,7 +320,12 @@ pub const Section = struct {
         if (dwarf.bin_file.cast(.elf)) |elf_file| {
             const zo = elf_file.zigObjectPtr().?;
             const atom = zo.symbol(sec.index).atom(elf_file).?;
-            return atom.offset(elf_file);
+            const result = atom.offset(elf_file);
+            if (result > 100000000) { // > 100MB is suspicious
+                const shdr = elf_file.sections.items(.shdr)[atom.output_section_index];
+                std.debug.print("DEBUG Section.off: SUSPICIOUS offset={} (sh_offset={}, atom.value={}, atom.value as i64={})\n", .{ result, shdr.sh_offset, atom.value, @as(i64, @bitCast(atom.value)) });
+            }
+            return result;
         } else if (dwarf.bin_file.cast(.macho)) |macho_file| {
             const header = if (macho_file.d_sym) |d_sym|
                 d_sym.sections.items[sec.index]
