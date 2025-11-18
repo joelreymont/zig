@@ -39,4 +39,5 @@ zig-cache/
 /build_final.log
 /build_atomic.log
 /build_overflow.log
+/build_function_calls.log
 /compiler_rt.c

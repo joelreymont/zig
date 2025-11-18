@@ -451,6 +451,8 @@ pub const Inst = struct {
         rel,
         /// Rn, target
         r_rel,
+        /// Navigation index (for direct function calls)
+        nav,
 
         // Bit field operands
         /// Rd, Rn, #lsb, #width
@@ -604,6 +606,9 @@ pub const Inst = struct {
 
         /// Extra data offset
         payload: u32,
+
+        /// Navigation index (for function calls to link to)
+        nav: u32, // InternPool.Nav.Index
     };
 };
 

@@ -2534,26 +2534,75 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
     }
 
     // Generate call instruction
-    switch (try self.resolveInst(callee.toIndex().?)) {
-        .register => |reg| {
-            // BLR - Branch with link to register
-            try self.addInst(.{
-                .tag = .blr,
-                .ops = .r,
-                .data = .{ .r = reg },
-            });
-        },
-        .memory => {
-            // TODO: Load function pointer and call via BLR
-            return self.fail("TODO: ARM64 indirect calls via memory", .{});
-        },
-        else => {
-            // Direct call - assume it's a symbol
-            // BL - Branch with link (direct call)
-            // TODO: For now, we'll use BLR with the callee in a register
-            // This needs proper symbol resolution
-            return self.fail("TODO: ARM64 direct function calls need symbol resolution", .{});
-        },
+    if (callee.toIndex()) |callee_index| {
+        // Callee is an AIR instruction (computed at runtime)
+        switch (try self.resolveInst(callee_index)) {
+            .register => |reg| {
+                // BLR - Branch with link to register
+                try self.addInst(.{
+                    .tag = .blr,
+                    .ops = .r,
+                    .data = .{ .r = reg },
+                });
+            },
+            .memory => |mem| {
+                // Load function pointer from memory and call via BLR
+                const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(temp_reg);
+
+                try self.addInst(.{
+                    .tag = .ldr,
+                    .ops = .rm,
+                    .data = .{ .rm = .{
+                        .rd = temp_reg,
+                        .mem = mem,
+                    } },
+                });
+
+                try self.addInst(.{
+                    .tag = .blr,
+                    .ops = .r,
+                    .data = .{ .r = temp_reg },
+                });
+            },
+            else => |mcv| return self.fail("TODO: ARM64 airCall with callee type {}", .{mcv}),
+        }
+    } else if (callee.toInterned()) |callee_interned| {
+        // Callee is an interned constant (direct function call)
+        const ip = &self.pt.zcu.intern_pool;
+        const func_key = ip.indexToKey(callee_interned);
+
+        // Extract the navigation index for the function
+        const nav_index = switch (func_key) {
+            .func => |func| func.owner_nav,
+            .@"extern" => |@"extern"| @"extern".owner_nav,
+            .ptr => |ptr| blk: {
+                if (ptr.byte_offset != 0) return self.fail("TODO: function pointer with offset", .{});
+                switch (ptr.base_addr) {
+                    .nav => |nav| {
+                        const nav_val = self.pt.zcu.navValue(nav);
+                        const nav_key = ip.indexToKey(nav_val.toIntern());
+                        break :blk switch (nav_key) {
+                            .func => |func| func.owner_nav,
+                            .@"extern" => |@"extern"| @"extern".owner_nav,
+                            else => return self.fail("TODO: function pointer to non-function: {}", .{nav_key}),
+                        };
+                    },
+                    else => return self.fail("TODO: function pointer base {}", .{ptr.base_addr}),
+                }
+            },
+            else => return self.fail("TODO: direct call to non-function type {}", .{func_key}),
+        };
+
+        // Emit BL instruction - will be relocated by linker
+        // Navigation index stored for linker to resolve
+        try self.addInst(.{
+            .tag = .bl,
+            .ops = .nav,
+            .data = .{ .nav = @intFromEnum(nav_index) },
+        });
+    } else {
+        return self.fail("Invalid callee reference", .{});
     }
 
     // Restore stack pointer if we adjusted it for stack arguments
