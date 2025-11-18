@@ -3144,15 +3144,182 @@ fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, 
         },
         .mul => {
             // For multiplication overflow detection on ARM64:
-            // - For signed: use SMULL (signed multiply long) or SMULH (high part)
-            // - For unsigned: use UMULH (unsigned multiply high)
-            // Compare high part with sign extension of low part
-            return self.fail("TODO: mul_with_overflow requires SMULH/UMULH comparison", .{});
+            // - For signed: use MUL + SMULH, check if high == sign_extend(low)
+            // - For unsigned: use MUL + UMULH, check if high == 0
+
+            const result_ty = self.typeOf(bin.lhs);
+            const int_info = result_ty.intInfo(self.pt.zcu);
+            const is_signed = int_info.signedness == .signed;
+
+            // Compute low part: result_reg = lhs * rhs
+            try self.addInst(.{
+                .tag = .mul,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = result_reg,
+                    .rn = lhs.register,
+                    .rm = rhs.register,
+                } },
+            });
+
+            if (is_signed) {
+                // For signed: compute high part with SMULH
+                const high_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(high_reg);
+
+                try self.addInst(.{
+                    .tag = .smulh,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = high_reg,
+                        .rn = lhs.register,
+                        .rm = rhs.register,
+                    } },
+                });
+
+                // Check overflow: high != arithmetic_shift_right(low, 63)
+                // ASR temp, result_reg, #63 (sign extend)
+                const sign_ext_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(sign_ext_reg);
+
+                try self.addInst(.{
+                    .tag = .asr,
+                    .ops = .rri,
+                    .data = .{ .rri = .{
+                        .rd = sign_ext_reg,
+                        .rn = result_reg,
+                        .imm = 63,
+                    } },
+                });
+
+                // CMP high, sign_ext
+                try self.addInst(.{
+                    .tag = .cmp,
+                    .ops = .rr,
+                    .data = .{ .rr = .{
+                        .rn = high_reg,
+                        .rd = sign_ext_reg,
+                    } },
+                });
+
+                // CSET overflow_reg, NE - Set to 1 if not equal (overflow)
+                try self.addInst(.{
+                    .tag = .cset,
+                    .ops = .rrc,
+                    .data = .{ .rrc = .{
+                        .rd = overflow_reg,
+                        .rn = .xzr,
+                        .cond = .ne,
+                    } },
+                });
+            } else {
+                // For unsigned: compute high part with UMULH
+                const high_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                defer self.register_manager.freeReg(high_reg);
+
+                try self.addInst(.{
+                    .tag = .umulh,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = high_reg,
+                        .rn = lhs.register,
+                        .rm = rhs.register,
+                    } },
+                });
+
+                // Check overflow: high != 0
+                // CMP high, XZR (compare with zero)
+                try self.addInst(.{
+                    .tag = .cmp,
+                    .ops = .rr,
+                    .data = .{ .rr = .{
+                        .rn = high_reg,
+                        .rd = .xzr,
+                    } },
+                });
+
+                // CSET overflow_reg, NE - Set to 1 if not equal to 0 (overflow)
+                try self.addInst(.{
+                    .tag = .cset,
+                    .ops = .rrc,
+                    .data = .{ .rrc = .{
+                        .rd = overflow_reg,
+                        .rn = .xzr,
+                        .cond = .ne,
+                    } },
+                });
+            }
         },
         .shl => {
-            // For shift overflow: shift, then shift back and compare
-            // Or use signed/unsigned overflow detection
-            return self.fail("TODO: shl_with_overflow requires shift-and-compare logic", .{});
+            // For shift left overflow detection:
+            // 1. Perform the shift: result = lhs << rhs
+            // 2. Shift back: temp = result >> rhs (arithmetic for signed, logical for unsigned)
+            // 3. Compare temp with original lhs
+            // 4. If different, overflow occurred
+
+            const result_ty = self.typeOf(bin.lhs);
+            const int_info = result_ty.intInfo(self.pt.zcu);
+            const is_signed = int_info.signedness == .signed;
+
+            // LSL result_reg, lhs, rhs (shift left)
+            try self.addInst(.{
+                .tag = .lsl,
+                .ops = .rrr,
+                .data = .{ .rrr = .{
+                    .rd = result_reg,
+                    .rn = lhs.register,
+                    .rm = rhs.register,
+                } },
+            });
+
+            // Shift back to check for overflow
+            const shifted_back_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            defer self.register_manager.freeReg(shifted_back_reg);
+
+            if (is_signed) {
+                // ASR shifted_back, result, rhs (arithmetic shift right)
+                try self.addInst(.{
+                    .tag = .asr,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = shifted_back_reg,
+                        .rn = result_reg,
+                        .rm = rhs.register,
+                    } },
+                });
+            } else {
+                // LSR shifted_back, result, rhs (logical shift right)
+                try self.addInst(.{
+                    .tag = .lsr,
+                    .ops = .rrr,
+                    .data = .{ .rrr = .{
+                        .rd = shifted_back_reg,
+                        .rn = result_reg,
+                        .rm = rhs.register,
+                    } },
+                });
+            }
+
+            // CMP shifted_back, lhs (compare with original)
+            try self.addInst(.{
+                .tag = .cmp,
+                .ops = .rr,
+                .data = .{ .rr = .{
+                    .rn = shifted_back_reg,
+                    .rd = lhs.register,
+                } },
+            });
+
+            // CSET overflow_reg, NE - Set to 1 if not equal (overflow)
+            try self.addInst(.{
+                .tag = .cset,
+                .ops = .rrc,
+                .data = .{ .rrc = .{
+                    .rd = overflow_reg,
+                    .rn = .xzr,
+                    .cond = .ne,
+                } },
+            });
         },
     }
 
