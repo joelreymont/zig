@@ -586,39 +586,129 @@ fn encodeStp(_: Mir.Inst) Error!Instruction {
 
 fn encodeLdxr(inst: Mir.Inst) Error!Instruction {
     // LDXR - Load Exclusive Register
-    // Format: LDXR Rt, [Xn]
+    // Format: LDXR Xt, [Xn{, #0}]
+    // ARM64 encoding: size=11 001000 0 L=1 0 Rs=11111 o0=0 Rt2=11111 Rn Rt
+    // [31:30]=11 [29:24]=001000 [23]=0 [22]=1 [21]=0 [20:16]=11111 [15]=0 [14:10]=11111 [9:5]=Rn [4:0]=Rt
     const data = inst.data.rm;
-    _ = data;
+    const rt = data.rd.id();
+    const rn = data.mem.base.id();
 
-    // Placeholder - these instructions need proper encoding support in encoding.zig
-    // For now, return NOP to allow compilation to proceed
-    return encodeNop();
+    const size: u32 = 0b11; // 64-bit
+    const fixed: u32 = 0b001000;
+    const l: u32 = 1; // Load
+    const rs: u32 = 0b11111; // Reserved for exclusive loads
+    const rt2: u32 = 0b11111; // Reserved
+
+    const insn: u32 =
+        (size << 30) |
+        (fixed << 24) |
+        (l << 22) |
+        (rs << 16) |
+        (rt2 << 10) |
+        (@as(u32, rn) << 5) |
+        @as(u32, rt);
+
+    return @bitCast(insn);
 }
 
 fn encodeStxr(inst: Mir.Inst) Error!Instruction {
     // STXR - Store Exclusive Register
-    // Format: STXR Ws, Rt, [Xn]
-    // Ws is status register (r1), Rt is value register (r2), Xn is address base
+    // Format: STXR Ws, Xt, [Xn{, #0}]
+    // ARM64 encoding: size=11 001000 0 L=0 0 Rs Rt2=11111 Rn Rt
+    // [31:30]=11 [29:24]=001000 [23]=0 [22]=0 [21]=0 [20:16]=Rs [15]=0 [14:10]=11111 [9:5]=Rn [4:0]=Rt
     const data = inst.data.rrm;
-    _ = data;
+    const ws = data.r1.id(); // Status register (W register, but use id directly)
+    const rt = data.r2.id(); // Value register
+    const rn = data.mem.base.id(); // Address register
 
-    // Placeholder - these instructions need proper encoding support in encoding.zig
-    // For now, return NOP to allow compilation to proceed
-    return encodeNop();
+    const size: u32 = 0b11; // 64-bit
+    const fixed: u32 = 0b001000;
+    const l: u32 = 0; // Store
+    const rt2: u32 = 0b11111; // Reserved
+
+    const insn: u32 =
+        (size << 30) |
+        (fixed << 24) |
+        (l << 22) |
+        (@as(u32, ws) << 16) |
+        (rt2 << 10) |
+        (@as(u32, rn) << 5) |
+        @as(u32, rt);
+
+    return @bitCast(insn);
 }
 
 fn encodeAtomicLSE(inst: Mir.Inst) Error!Instruction {
-    // Atomic LSE (Large System Extensions) instructions:
-    // LDADD, LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN, LDUMAX, LDUMIN, SWP, CAS
-    // Format: LD<op> Rs, Rt, [Xn]  or  SWP Rs, Rt, [Xn]  or  CAS Rs, Rt, [Xn]
+    // Atomic LSE (Large System Extensions) instructions
+    // ARM64 encoding: size A=1 R=1 1000 opc Rs 0 Rn Rt
+    // [31:30]=size [29]=A [28]=R [27:24]=1000 [23:21]=opc [20:16]=Rs [15]=0 [14:12]=opc2 [11:10]=00 [9:5]=Rn [4:0]=Rt
+    //
+    // Simplified encoding for acquire-release semantics (A=1, R=1):
+    // LDADD:  opc=000, opc2=000
+    // LDCLR:  opc=001, opc2=000
+    // LDEOR:  opc=010, opc2=000
+    // LDSET:  opc=011, opc2=000
+    // LDSMAX: opc=100, opc2=000
+    // LDSMIN: opc=101, opc2=000
+    // LDUMAX: opc=110, opc2=000
+    // LDUMIN: opc=111, opc2=000
+    // SWP:    opc=000, opc2=100
+    // CAS:    Special encoding (different format)
 
-    // These instructions all follow a similar encoding pattern but aren't
-    // currently supported in encoding.zig. For now, return NOP to allow
-    // compilation to proceed. Full encoding support would require extending
-    // the Instruction union in encoding.zig.
+    const data = inst.data.rrm;
+    const rs = data.r1.id(); // Source operand
+    const rt = data.r2.id(); // Destination (receives old value)
+    const rn = data.mem.base.id(); // Memory address
 
-    _ = inst;
-    return encodeNop();
+    const size: u32 = 0b11; // 64-bit
+    const a: u32 = 1; // Acquire
+    const r: u32 = 1; // Release
+    const fixed: u32 = 0b1000;
+
+    // Determine opcode based on instruction tag
+    const opc: u3 = switch (inst.tag) {
+        .ldadd => 0b000,
+        .ldclr => 0b001,
+        .ldeor => 0b010,
+        .ldset => 0b011,
+        .ldsmax => 0b100,
+        .ldsmin => 0b101,
+        .ldumax => 0b110,
+        .ldumin => 0b111,
+        .swp => 0b000, // SWP uses different opc2
+        .cas => 0b000, // CAS has different encoding (handled below)
+        else => return error.InvalidOperands,
+    };
+
+    // opc2 field distinguishes SWP from LDADD
+    const opc2: u3 = if (inst.tag == .swp) 0b100 else 0b000;
+
+    // CAS has a different encoding pattern
+    if (inst.tag == .cas) {
+        // CAS: size 0 0 1000 1 Rs 1 Rn Rt
+        const cas_bits: u32 =
+            (size << 30) |
+            (0b001000 << 24) |
+            (1 << 23) |
+            (@as(u32, rs) << 16) |
+            (1 << 15) |
+            (@as(u32, rn) << 5) |
+            @as(u32, rt);
+        return @bitCast(cas_bits);
+    }
+
+    const insn: u32 =
+        (size << 30) |
+        (a << 29) |
+        (r << 28) |
+        (fixed << 24) |
+        (@as(u32, opc) << 21) |
+        (@as(u32, rs) << 16) |
+        (@as(u32, opc2) << 12) |
+        (@as(u32, rn) << 5) |
+        @as(u32, rt);
+
+    return @bitCast(insn);
 }
 
 // ============================================================================

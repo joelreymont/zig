@@ -50,5 +50,7 @@ zig-cache/
 /build_xchg_sub.log
 /build_nand.log
 /build_atomic_stubs.log
+/build_raw_encoding.log
+/build_raw_encoding2.log
 /atomics_test.log
 /compiler_rt.c
