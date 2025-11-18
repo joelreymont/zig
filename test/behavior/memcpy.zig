@@ -87,7 +87,6 @@ fn testMemcpyCPointer() !void {
 }
 
 test "@memcpy slice" {
-    if (builtin.zig_backend == .stage2_aarch64) return error.SkipZigTest;
     if (builtin.zig_backend == .stage2_arm) return error.SkipZigTest;
     if (builtin.zig_backend == .stage2_sparc64) return error.SkipZigTest;
     if (builtin.zig_backend == .stage2_spirv) return error.SkipZigTest;
@@ -152,7 +151,6 @@ test "@memcpy zero-bit type with aliasing" {
 }
 
 test "@memcpy with sentinel" {
-    if (builtin.zig_backend == .stage2_aarch64) return error.SkipZigTest;
     if (builtin.zig_backend == .stage2_spirv) return error.SkipZigTest;
 
     const S = struct {
