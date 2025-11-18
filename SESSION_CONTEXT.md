@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-a8350891 - Implement raw instruction encoding for atomic LSE and exclusive load/store
+50a7bd4a - Make ELF growSection resilient to sparse file regions
 
 ## Session Status: ACTIVE
 
@@ -81,6 +81,26 @@ a8350891 - Implement raw instruction encoding for atomic LSE and exclusive load/
    - Used acquire-release semantics (A=1, R=1) for all LSE instructions
    - **IMPACT**: Atomic operations now generate FUNCTIONAL machine code!
    - **STATUS**: All 3 compiler layers complete: AIR → MIR → Machine Code ✅
+
+11. 🔄 **DWARF Debug Info Investigation** (Commits: eaa215cb, 356f2434, c314585a, 50a7bd4a)
+   - **PROBLEM**: ARM64 DWARF generation failing with error.Unexpected
+   - **Root Cause Found**: Sparse file holes causing copyRangeAll failures
+     - Sections created with setEndPos() but no data written (sparse holes)
+     - growSection() tries to copy uninitialized data during relocation
+     - copyRangeAll/pread fails reading from unwritten file offsets
+   - **Partial Fix** (Commit: 50a7bd4a): Make growSection resilient to sparse files
+     - Catch copyRangeAll failures and treat as no-op
+     - Allows section relocation without failing on sparse regions
+   - **Debugging Added**:
+     - Added extensive debug output to Elf.zig growSection()
+     - Added debug output to posix.zig copy_file_range and pread
+     - Traced error.Unexpected through multiple layers
+   - **Known Issues**:
+     - Still fails with error.Unexpected from DWARF pwriteAll operations
+     - Root cause: DWARF tries to write before file extended to target offsets
+     - With `-fstrip` flag: ARM64 compilation works perfectly
+     - Without `-fstrip`: Partial object files generated but with errors
+   - **Next Steps**: Investigate DWARF pwriteAll failures, compare with LLVM backend
 
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL
@@ -164,19 +184,20 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 
 ## Statistics
 
-### This Session (Commits: 6db35313...a8350891) - 15 commits
-- Lines added: ~1312 (includes raw instruction encoding)
-- Lines modified: ~130
+### This Session (Commits: 6db35313...50a7bd4a) - 19 commits
+- Lines added: ~1345 (includes raw instruction encoding + debug output)
+- Lines modified: ~145
 - Lines removed (test skips): 15
-- TODOs resolved: 13
+- TODOs resolved: 16
 - Atomic RMW operations: 9/9 FULLY FUNCTIONAL ✅
 - Code generation: ALL LAYERS COMPLETE (AIR → MIR → Machine Code)
 - Build: SUCCESSFUL (20M zig2 binary)
 - Tests enabled: 15 (atomics + memcpy + memset)
 - **Breakthrough**: Implemented raw ARM64 instruction encoding for atomic operations
+- **Debugging**: Identified and partially fixed DWARF sparse file issue
 
 ### Cumulative Progress
-- Total commits: 60
+- Total commits: 64
 - Implementation: 100+ AIR instructions
 - Atomic operations: 9/9 RMW variants FULLY FUNCTIONAL with real machine code ✅
 - Code generation layers: AIR → MIR ✅, MIR → Machine Code ✅ COMPLETE!
