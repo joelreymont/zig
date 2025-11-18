@@ -4246,15 +4246,43 @@ pub fn navSrcLoc(zcu: *const Zcu, nav_index: InternPool.Nav.Index) LazySrcLoc {
 }
 
 pub fn typeSrcLoc(zcu: *const Zcu, ty_index: InternPool.Index) LazySrcLoc {
-    _ = zcu;
-    _ = ty_index;
-    @panic("TODO");
+    const ip = &zcu.intern_pool;
+    // Get the ZIR index for types that have source locations
+    const zir_index: InternPool.TrackedInst.Index = switch (ip.indexToKey(ty_index)) {
+        .struct_type => ip.loadStructType(ty_index).zir_index,
+        .union_type => ip.loadUnionType(ty_index).zir_index,
+        .enum_type => ip.loadEnumType(ty_index).zir_index.unwrap() orelse {
+            // Enum without source location (e.g., generated enum)
+            return LazySrcLoc.unneeded;
+        },
+        .opaque_type => ip.loadOpaqueType(ty_index).zir_index,
+        // For primitive types and other types without source locations,
+        // return an unneeded location
+        else => return LazySrcLoc.unneeded,
+    };
+    return .{
+        .base_node_inst = zir_index,
+        .offset = LazySrcLoc.Offset.nodeOffset(.zero),
+    };
 }
 
 pub fn typeFileScope(zcu: *Zcu, ty_index: InternPool.Index) *File {
-    _ = zcu;
-    _ = ty_index;
-    @panic("TODO");
+    const ip = &zcu.intern_pool;
+    // Get the ZIR index for the type
+    const zir_index: InternPool.TrackedInst.Index = switch (ip.indexToKey(ty_index)) {
+        .struct_type => ip.loadStructType(ty_index).zir_index,
+        .union_type => ip.loadUnionType(ty_index).zir_index,
+        .enum_type => blk: {
+            const enum_type = ip.loadEnumType(ty_index);
+            // Enum types should always have a zir_index for user-defined enums
+            break :blk enum_type.zir_index.unwrap() orelse unreachable;
+        },
+        .opaque_type => ip.loadOpaqueType(ty_index).zir_index,
+        // Only container types should be passed to typeFileScope
+        else => unreachable,
+    };
+    // Resolve the tracked instruction to get the file
+    return zcu.fileByIndex(zir_index.resolveFile(ip));
 }
 
 pub fn navSrcLine(zcu: *Zcu, nav_index: InternPool.Nav.Index) u32 {
