@@ -35,6 +35,7 @@ pub fn encode(inst: Mir.Inst) Error!Instruction {
         .orr => encodeOrr(inst),
         .eor => encodeEor(inst),
         .mvn => encodeMvn(inst),
+        .neg => encodeNeg(inst),
 
         // Shifts
         .lsl => encodeLsl(inst),
@@ -365,6 +366,22 @@ fn encodeMvn(inst: Mir.Inst) Error!Instruction {
         data.rn.id(),
         31, // XZR/WZR
         data.rd.id(),
+        false,
+    );
+}
+
+fn encodeNeg(inst: Mir.Inst) Error!Instruction {
+    const data = inst.data.rr;
+    const sf: u1 = if (data.rd.isGeneralPurpose() and @intFromEnum(data.rd) < 31) 1 else 0;
+    // NEG is SUB Rd, XZR, Rn (subtract from zero)
+    return Instruction.addSubtractShiftedRegister(
+        "sub",
+        @enumFromInt(sf),
+        data.rd.id(),
+        31, // XZR/WZR
+        data.rn.id(),
+        .lsl,
+        0,
         false,
     );
 }

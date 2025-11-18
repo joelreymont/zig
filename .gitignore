@@ -52,5 +52,9 @@ zig-cache/
 /build_atomic_stubs.log
 /build_raw_encoding.log
 /build_raw_encoding2.log
+/build_with_neg.log
 /atomics_test.log
+/atomics_test_real_encoding.log
+/atomics.c
+/*.o
 /compiler_rt.c
