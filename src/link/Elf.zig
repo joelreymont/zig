@@ -522,7 +522,13 @@ fn detectAllocCollision(self: *Elf, start: u64, size: u64) !?u64 {
         }
     }
 
-    if (at_end) try self.base.file.?.setEndPos(end);
+    if (at_end) {
+        std.debug.print("DEBUG Elf.detectAllocCollision: calling setEndPos({})\n", .{end});
+        self.base.file.?.setEndPos(end) catch |err| {
+            std.debug.print("DEBUG Elf.detectAllocCollision: setEndPos failed with error: {s}\n", .{@errorName(err)});
+            return err;
+        };
+    }
     return null;
 }
 
@@ -574,18 +580,26 @@ pub fn growSection(self: *Elf, shdr_index: u32, needed_size: u64, min_alignment:
                 new_offset,
             });
 
-            const amt = try self.base.file.?.copyRangeAll(
+            std.debug.print("DEBUG Elf.growSection: calling copyRangeAll(from={}, to={}, size={})\n", .{ shdr.sh_offset, new_offset, existing_size });
+            const amt = self.base.file.?.copyRangeAll(
                 shdr.sh_offset,
                 self.base.file.?,
                 new_offset,
                 existing_size,
-            );
+            ) catch |err| {
+                std.debug.print("DEBUG Elf.growSection: copyRangeAll failed with error: {s}\n", .{@errorName(err)});
+                return err;
+            };
             // TODO figure out what to about this error condition - how to communicate it up.
             if (amt != existing_size) return error.InputOutput;
 
             shdr.sh_offset = new_offset;
         } else if (shdr.sh_offset + allocated_size == std.math.maxInt(u64)) {
-            try self.base.file.?.setEndPos(shdr.sh_offset + needed_size);
+            std.debug.print("DEBUG Elf.growSection: calling setEndPos({})\n", .{shdr.sh_offset + needed_size});
+            self.base.file.?.setEndPos(shdr.sh_offset + needed_size) catch |err| {
+                std.debug.print("DEBUG Elf.growSection: setEndPos failed with error: {s}\n", .{@errorName(err)});
+                return err;
+            };
         }
     }
 
