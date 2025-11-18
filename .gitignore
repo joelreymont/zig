@@ -40,4 +40,7 @@ zig-cache/
 /build_atomic.log
 /build_overflow.log
 /build_function_calls.log
+/build_memops.log
+/build_datastructures.log
+/build_datastructures2.log
 /compiler_rt.c
