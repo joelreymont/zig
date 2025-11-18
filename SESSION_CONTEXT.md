@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-5bd3f10f - Add atomic operation enhancements for ARM64 backend
+09570f1b - Implement atomic Nand operation using LDXR/STXR loop
 
 ## Session Status: ACTIVE
 
@@ -53,6 +53,14 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
    - Implemented .Sub operation using NEG + LDADD
    - Documented .Nand TODO (requires LDXR/STXR loop, not yet in MIR)
    - Atomic RMW operations: 8/9 variants implemented (missing only Nand)
+
+8. ✅ **Atomic Nand Operation** (Commit: 09570f1b)
+   - Added LDXR and STXR instruction tags to Mir_v2.zig
+   - Implemented Nand using LDXR/STXR retry loop in airAtomicRmw
+   - LDXR loads with exclusive monitor, AND + MVN computes ~(old & operand)
+   - STXR attempts store, CBNZ retries if failed
+   - Added encodeLdxr and encodeStxr to encoder.zig
+   - Atomic RMW operations: 9/9 variants COMPLETE
 
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL
@@ -136,39 +144,40 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 
 ## Statistics
 
-### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9, 5bd3f10f)
-- Lines added: ~1050
-- Lines modified: ~80
+### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9, 5bd3f10f, 09570f1b)
+- Lines added: ~1176
+- Lines modified: ~84
 - Lines removed (test skips): 15
-- TODOs resolved: 12
-- Atomic RMW operations: 8/9 implemented
+- TODOs resolved: 13
+- Atomic RMW operations: 9/9 COMPLETE
 - Build: SUCCESSFUL
 - Tests enabled: 15 (atomics + memcpy + memset)
 
 ### Cumulative Progress
-- Total commits: 56
+- Total commits: 57
 - Implementation: 100+ AIR instructions
-- Atomic operations: 8/9 RMW variants (Nand requires LDXR/STXR)
+- Atomic operations: 9/9 RMW variants COMPLETE (including Nand via LDXR/STXR)
 - Coverage: 100% of Phase 2 (Advanced Features COMPLETE)
 - Phase 3: Testing infrastructure enabled
 - Build: SUCCESSFUL
 
 ## Next Steps (in order of priority)
 
-1. **Implement atomic Nand operation** - Complete remaining RMW variant
-   - Add LDXR/STXR (load-exclusive/store-exclusive) to MIR
-   - Add encoder support for LDXR/STXR instructions
-   - Implement NAND using LDXR/STXR loop with retry logic
-
-2. **Write tests** - Ensure correctness of implemented features
-   - Atomic operations tests (8/9 operations pass, Nand needs implementation)
+1. **Write tests** - Ensure correctness of implemented features
+   - Atomic operations tests (all 9/9 operations now implemented)
    - Overflow detection tests
    - Function call tests
    - Memory operation tests (memset/memcpy)
+   - Test the LDXR/STXR loop for Nand operation
 
-3. **Complete remaining TODOs** - Clean up any edge cases
+2. **Complete remaining TODOs** - Clean up any edge cases
+   - Edge cases for larger payloads in data structures
+   - Additional memory ordering scenarios
 
-4. **Optimization pass** - Improve code generation quality
+3. **Optimization pass** - Improve code generation quality
+   - Register allocation improvements
+   - Instruction selection optimization
+   - Branch optimization
 
 ## Technical Notes
 
