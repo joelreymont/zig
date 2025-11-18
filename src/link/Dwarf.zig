@@ -980,8 +980,12 @@ const Entry = struct {
 
     fn replace(entry_ptr: *Entry, unit: *Unit, sec: *Section, dwarf: *Dwarf, contents: []const u8) UpdateError!void {
         assert(contents.len == entry_ptr.len);
-        const write_offset = sec.off(dwarf) + unit.off + unit.header_len + entry_ptr.off;
+        const sec_off = sec.off(dwarf);
+        const write_offset = sec_off + unit.off + unit.header_len + entry_ptr.off;
         const file_end = dwarf.getFile().?.getEndPos() catch 0;
+        if (write_offset > 100000000) { // > 100MB is suspicious
+            std.debug.print("DEBUG Dwarf.replace: HUGE offset breakdown: sec.off={}, unit.off={}, unit.header_len={}, entry.off={}, TOTAL={}\n", .{ sec_off, unit.off, unit.header_len, entry_ptr.off, write_offset });
+        }
         std.debug.print("DEBUG Dwarf.replace: pwriteAll(offset={}, len={}, file_end={})\n", .{ write_offset, contents.len, file_end });
         if (write_offset + contents.len > file_end) {
             std.debug.print("DEBUG Dwarf.replace: WARNING - writing beyond file end! Extending file...\n", .{});
@@ -990,7 +994,7 @@ const Entry = struct {
                 return err;
             };
         }
-        try dwarf.getFile().?.pwriteAll(contents, write_offset);
+        try pwriteAllSafe(dwarf.getFile().?, contents, write_offset);
         if (false) {
             const buf = try dwarf.gpa.alloc(u8, sec.len);
             defer dwarf.gpa.free(buf);
