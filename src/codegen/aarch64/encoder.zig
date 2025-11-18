@@ -657,14 +657,154 @@ fn encodeStrh(inst: Mir.Inst) Error!Instruction {
     };
 }
 
-fn encodeLdp(_: Mir.Inst) Error!Instruction {
-    // Simplified - would need proper implementation
-    return error.UnimplementedInstruction;
+fn encodeLdp(inst: Mir.Inst) Error!Instruction {
+    // LDP - Load Pair of Registers
+    // Supports pre-indexed, post-indexed, and signed offset addressing modes
+    const data = inst.data.mrr;
+
+    // Determine register size (64-bit X registers or 32-bit W registers)
+    const sf: encoding.Register.GeneralSize = if (@intFromEnum(data.r1) < 31)
+        .doubleword
+    else
+        .word;
+
+    // The immediate is scaled by register size (8 for 64-bit, 4 for 32-bit)
+    const scale: i32 = if (sf == .doubleword) 8 else 4;
+
+    return switch (data.mem.offset) {
+        .pre_index => |offset| blk: {
+            // Pre-indexed: LDP Xt1, Xt2, [Xn, #imm]!
+            const imm7: i7 = @intCast(@divExact(offset, scale));
+            const ldp_insn = encoding.Instruction.LoadStore.RegisterPairPreIndexed.Integer.Ldp{
+                .Rt = @enumFromInt(data.r1.id()),
+                .Rn = @enumFromInt(data.mem.base.id()),
+                .Rt2 = @enumFromInt(data.r2.id()),
+                .imm7 = imm7,
+                .sf = sf,
+            };
+            break :blk @bitCast(encoding.Instruction{
+                .load_store = .{
+                    .register_pair_pre_indexed = .{
+                        .integer = .{ .ldp = ldp_insn },
+                    },
+                },
+            });
+        },
+        .post_index => |offset| blk: {
+            // Post-indexed: LDP Xt1, Xt2, [Xn], #imm
+            const imm7: i7 = @intCast(@divExact(offset, scale));
+            const ldp_insn = encoding.Instruction.LoadStore.RegisterPairPostIndexed.Integer.Ldp{
+                .Rt = @enumFromInt(data.r1.id()),
+                .Rn = @enumFromInt(data.mem.base.id()),
+                .Rt2 = @enumFromInt(data.r2.id()),
+                .imm7 = imm7,
+                .sf = sf,
+            };
+            break :blk @bitCast(encoding.Instruction{
+                .load_store = .{
+                    .register_pair_post_indexed = .{
+                        .integer = .{ .ldp = ldp_insn },
+                    },
+                },
+            });
+        },
+        .immediate => |offset| blk: {
+            // Signed offset: LDP Xt1, Xt2, [Xn, #imm]
+            const imm7: i7 = @intCast(@divExact(offset, scale));
+            const ldp_insn = encoding.Instruction.LoadStore.RegisterPairOffset.Integer.Ldp{
+                .Rt = @enumFromInt(data.r1.id()),
+                .Rn = @enumFromInt(data.mem.base.id()),
+                .Rt2 = @enumFromInt(data.r2.id()),
+                .imm7 = imm7,
+                .sf = sf,
+            };
+            break :blk @bitCast(encoding.Instruction{
+                .load_store = .{
+                    .register_pair_offset = .{
+                        .integer = .{ .ldp = ldp_insn },
+                    },
+                },
+            });
+        },
+        else => error.InvalidOperands,
+    };
 }
 
-fn encodeStp(_: Mir.Inst) Error!Instruction {
-    // Simplified - would need proper implementation
-    return error.UnimplementedInstruction;
+fn encodeStp(inst: Mir.Inst) Error!Instruction {
+    // STP - Store Pair of Registers
+    // Supports pre-indexed, post-indexed, and signed offset addressing modes
+    const data = inst.data.rrm;
+
+    // Determine register size (64-bit X registers or 32-bit W registers)
+    // X registers (0-30) have sf=1, W registers have sf=0
+    const sf: encoding.Register.GeneralSize = if (@intFromEnum(data.r1) < 31)
+        .doubleword
+    else
+        .word;
+
+    // The immediate is scaled by register size (8 for 64-bit, 4 for 32-bit)
+    const scale: i32 = if (sf == .doubleword) 8 else 4;
+
+    return switch (data.mem.offset) {
+        .pre_index => |offset| blk: {
+            // Pre-indexed: STP Xt1, Xt2, [Xn, #imm]!
+            // Writes back the updated address to the base register
+            const imm7: i7 = @intCast(@divExact(offset, scale));
+            const stp_insn = encoding.Instruction.LoadStore.RegisterPairPreIndexed.Integer.Stp{
+                .Rt = @enumFromInt(data.r1.id()),
+                .Rn = @enumFromInt(data.mem.base.id()),
+                .Rt2 = @enumFromInt(data.r2.id()),
+                .imm7 = imm7,
+                .sf = sf,
+            };
+            break :blk @bitCast(encoding.Instruction{
+                .load_store = .{
+                    .register_pair_pre_indexed = .{
+                        .integer = .{ .stp = stp_insn },
+                    },
+                },
+            });
+        },
+        .post_index => |offset| blk: {
+            // Post-indexed: STP Xt1, Xt2, [Xn], #imm
+            // Stores at Xn, then adds imm to Xn
+            const imm7: i7 = @intCast(@divExact(offset, scale));
+            const stp_insn = encoding.Instruction.LoadStore.RegisterPairPostIndexed.Integer.Stp{
+                .Rt = @enumFromInt(data.r1.id()),
+                .Rn = @enumFromInt(data.mem.base.id()),
+                .Rt2 = @enumFromInt(data.r2.id()),
+                .imm7 = imm7,
+                .sf = sf,
+            };
+            break :blk @bitCast(encoding.Instruction{
+                .load_store = .{
+                    .register_pair_post_indexed = .{
+                        .integer = .{ .stp = stp_insn },
+                    },
+                },
+            });
+        },
+        .immediate => |offset| blk: {
+            // Signed offset: STP Xt1, Xt2, [Xn, #imm]
+            // No writeback
+            const imm7: i7 = @intCast(@divExact(offset, scale));
+            const stp_insn = encoding.Instruction.LoadStore.RegisterPairOffset.Integer.Stp{
+                .Rt = @enumFromInt(data.r1.id()),
+                .Rn = @enumFromInt(data.mem.base.id()),
+                .Rt2 = @enumFromInt(data.r2.id()),
+                .imm7 = imm7,
+                .sf = sf,
+            };
+            break :blk @bitCast(encoding.Instruction{
+                .load_store = .{
+                    .register_pair_offset = .{
+                        .integer = .{ .stp = stp_insn },
+                    },
+                },
+            });
+        },
+        else => error.InvalidOperands,
+    };
 }
 
 fn encodeLdxr(inst: Mir.Inst) Error!Instruction {
