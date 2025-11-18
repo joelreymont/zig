@@ -46,4 +46,6 @@ zig-cache/
 /build_unsigned_atomic.log
 /build_unsigned_atomic2.log
 /build_unsigned_atomic3.log
+/build_acq_rel.log
+/build_xchg_sub.log
 /compiler_rt.c

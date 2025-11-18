@@ -4598,8 +4598,9 @@ fn airAtomicLoad(self: *CodeGen, inst: Air.Inst.Index) !void {
                 } },
             });
         },
-        .acquire, .seq_cst => {
+        .acquire, .acq_rel, .seq_cst => {
             // Load followed by DMB (Data Memory Barrier) for acquire semantics
+            // Note: acq_rel behaves like acquire for loads
             try self.addInst(.{
                 .tag = .ldr,
                 .ops = .rm,
@@ -4642,8 +4643,9 @@ fn airAtomicStore(self: *CodeGen, inst: Air.Inst.Index, comptime ordering: std.b
                 } },
             });
         },
-        .release, .seq_cst => {
+        .release, .acq_rel, .seq_cst => {
             // DMB followed by store for release semantics
+            // Note: acq_rel behaves like release for stores
             // DMB ISH - full memory barrier
             try self.addInst(.{
                 .tag = .dmb,
@@ -4689,30 +4691,47 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     // Select the appropriate LSE instruction based on operation
     const mir_tag: Mir.Inst.Tag = switch (op) {
+        .Xchg => .swp,  // SWP = atomic exchange
         .Add => .ldadd,
+        .Sub => .ldadd, // SUB is implemented as ADD with negated operand
         .And => .ldclr, // LDCLR with inverted operand = AND
         .Or => .ldset,  // LDSET = OR
         .Xor => .ldeor,
         .Max => if (is_signed) .ldsmax else .ldumax,  // Signed or unsigned max
         .Min => if (is_signed) .ldsmin else .ldumin,  // Signed or unsigned min
-        else => return self.fail("TODO: atomic_rmw operation {} not yet implemented", .{op}),
+        .Nand => return self.fail("TODO: atomic Nand requires LDXR/STXR loop, not yet implemented", .{}),
     };
 
-    // For And operation, we need to invert the operand first
+    // Prepare the actual operand (may need transformation for some operations)
     var actual_operand = operand.register;
-    if (op == .And) {
-        const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
-        defer self.register_manager.freeReg(temp_reg);
+    var temp_reg_allocated = false;
 
-        // MVN temp, operand (bitwise NOT)
-        try self.addInst(.{
-            .tag = .mvn,
-            .ops = .rr,
-            .data = .{ .rr = .{
-                .rd = temp_reg,
-                .rn = operand.register,
-            } },
-        });
+    if (op == .And or op == .Sub) {
+        const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        temp_reg_allocated = true;
+        defer if (temp_reg_allocated) self.register_manager.freeReg(temp_reg);
+
+        if (op == .And) {
+            // MVN temp, operand (bitwise NOT for LDCLR)
+            try self.addInst(.{
+                .tag = .mvn,
+                .ops = .rr,
+                .data = .{ .rr = .{
+                    .rd = temp_reg,
+                    .rn = operand.register,
+                } },
+            });
+        } else { // op == .Sub
+            // NEG temp, operand (negate for SUB via LDADD)
+            try self.addInst(.{
+                .tag = .neg,
+                .ops = .rr,
+                .data = .{ .rr = .{
+                    .rd = temp_reg,
+                    .rn = operand.register,
+                } },
+            });
+        }
         actual_operand = temp_reg;
     }
 
