@@ -4681,14 +4681,20 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     const dst_reg = try self.register_manager.allocReg(inst, .gp);
 
+    // Determine signedness for Max/Min operations
+    const zcu = self.pt.zcu;
+    const ptr_ty = self.typeOf(pl_op.operand);
+    const elem_ty = ptr_ty.childType(zcu); // Get element type from pointer
+    const is_signed = elem_ty.isSignedInt(zcu);
+
     // Select the appropriate LSE instruction based on operation
     const mir_tag: Mir.Inst.Tag = switch (op) {
         .Add => .ldadd,
         .And => .ldclr, // LDCLR with inverted operand = AND
         .Or => .ldset,  // LDSET = OR
         .Xor => .ldeor,
-        .Max => .ldsmax,
-        .Min => .ldsmin,
+        .Max => if (is_signed) .ldsmax else .ldumax,  // Signed or unsigned max
+        .Min => if (is_signed) .ldsmin else .ldumin,  // Signed or unsigned min
         else => return self.fail("TODO: atomic_rmw operation {} not yet implemented", .{op}),
     };
 

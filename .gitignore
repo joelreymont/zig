@@ -43,4 +43,6 @@ zig-cache/
 /build_memops.log
 /build_datastructures.log
 /build_datastructures2.log
+/build_unsigned_atomic.log
+/build_unsigned_atomic2.log
 /compiler_rt.c
