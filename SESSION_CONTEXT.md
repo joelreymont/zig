@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-09570f1b - Implement atomic Nand operation using LDXR/STXR loop
+0a346c77 - Add encoder stubs for atomic LSE and exclusive load/store instructions
 
 ## Session Status: ACTIVE
 
@@ -61,6 +61,14 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
    - STXR attempts store, CBNZ retries if failed
    - Added encodeLdxr and encodeStxr to encoder.zig
    - Atomic RMW operations: 9/9 variants COMPLETE
+
+9. ✅ **Encoder Stubs for Atomic Instructions** (Commit: 0a346c77)
+   - Discovered encoder.zig missing support for atomic LSE instructions
+   - Added encoder entries for: ldadd, ldclr, ldeor, ldset, ldsmax, ldsmin, ldumax, ldumin, swp, cas
+   - Added encodeAtomicLSE() function returning NOP placeholder
+   - Modified encodeLdxr/encodeStxr to return NOP placeholder
+   - Allows compilation success, but generated code emits NOPs instead of actual atomic operations
+   - **LIMITATION**: Full instruction encoding requires extending encoding.zig Instruction union
 
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL
@@ -144,37 +152,45 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 
 ## Statistics
 
-### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9, 5bd3f10f, 09570f1b)
-- Lines added: ~1176
-- Lines modified: ~84
+### This Session (Commits: 6db35313, dacf34cd, 596413ab, e1736d2f, e29bd258, 4efab473, 0e079f7e, eeffbac4, 8eda3c59, 387de2e9, 5bd3f10f, 09570f1b, 16c0d2e4, 0a346c77)
+- Lines added: ~1200 (includes encoder stubs)
+- Lines modified: ~110
 - Lines removed (test skips): 15
 - TODOs resolved: 13
-- Atomic RMW operations: 9/9 COMPLETE
+- Atomic RMW operations: 9/9 code generation COMPLETE (encoding pending)
 - Build: SUCCESSFUL
 - Tests enabled: 15 (atomics + memcpy + memset)
+- **Discovery**: Encoder lacks LSE/exclusive load-store instruction support
 
 ### Cumulative Progress
-- Total commits: 57
+- Total commits: 59
 - Implementation: 100+ AIR instructions
-- Atomic operations: 9/9 RMW variants COMPLETE (including Nand via LDXR/STXR)
-- Coverage: 100% of Phase 2 (Advanced Features COMPLETE)
-- Phase 3: Testing infrastructure enabled
+- Atomic operations: 9/9 RMW variants code gen COMPLETE (encoding stubs in place)
+- Code generation layers: AIR → MIR ✅, MIR → Machine Code ⚠️ (needs encoding support)
+- Coverage: 100% of Phase 2 code generation (encoding layer pending)
+- Phase 3: Testing blocked on encoder implementation
 - Build: SUCCESSFUL
 
 ## Next Steps (in order of priority)
 
-1. **Write tests** - Ensure correctness of implemented features
-   - Atomic operations tests (all 9/9 operations now implemented)
+1. **CRITICAL: Implement full instruction encoding** - Required for functional tests
+   - Extend encoding.zig Instruction union with LSE atomic structures
+   - Add LoadStoreExclusive structures for LDXR/STXR
+   - Implement proper encoding functions for all atomic instructions
+   - This is BLOCKING all atomic operation tests
+
+2. **Write tests** - Ensure correctness after encoding is complete
+   - Atomic operations tests (code gen done, needs encoding)
    - Overflow detection tests
    - Function call tests
    - Memory operation tests (memset/memcpy)
    - Test the LDXR/STXR loop for Nand operation
 
-2. **Complete remaining TODOs** - Clean up any edge cases
+3. **Complete remaining TODOs** - Clean up edge cases
    - Edge cases for larger payloads in data structures
    - Additional memory ordering scenarios
 
-3. **Optimization pass** - Improve code generation quality
+4. **Optimization pass** - Improve code generation quality
    - Register allocation improvements
    - Instruction selection optimization
    - Branch optimization
@@ -190,8 +206,11 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 ### Atomic Operations
 - Requires ARMv8.1-A LSE (Large System Extensions)
 - LDADD, LDCLR, LDEOR, LDSET for atomic RMW
-- LDSMAX, LDSMIN for signed max/min
-- CAS for compare-and-swap
+- LDSMAX, LDSMIN for signed max/min, LDUMAX, LDUMIN for unsigned
+- SWP for atomic exchange, CAS for compare-and-swap
+- LDXR/STXR for exclusive load/store (used for NAND operation)
+- **CURRENT STATUS**: Code generation (AIR → MIR) complete, encoding (MIR → machine code) returns NOP stubs
+- **BLOCKING ISSUE**: encoding.zig Instruction union lacks structures for LSE/exclusive instructions
 
 ### Stack Frame Layout
 ```
