@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-e1736d2f - Implement direct function calls and indirect calls via memory
+e29bd258 - Implement memset and memcpy with loop generation
 
 ## Session Status: ACTIVE
 
@@ -29,6 +29,12 @@ e1736d2f - Implement direct function calls and indirect calls via memory
    - Memory-based indirect calls (load + BLR)
    - Handle .func, .extern, .ptr function types
 
+4. ✅ **Memory Operations** (Commit: e29bd258)
+   - memset: unrolled STRB for small sizes, loop for large
+   - memcpy: 8-byte LDR/STR for small sizes, byte loop for large
+   - Handle both slices and array pointers
+   - Proper RegisterOffset structure usage
+
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL
 - ✅ zig2 binary: 20M
@@ -39,7 +45,7 @@ e1736d2f - Implement direct function calls and indirect calls via memory
 ### Phase 1: Core Operations ✅ COMPLETE
 All basic arithmetic, logical, shifts, loads, stores implemented.
 
-### Phase 2: Advanced Features (Current) - 82% Complete
+### Phase 2: Advanced Features (Current) - 88% Complete
 
 #### Recently Completed (This Session)
 - ✅ Atomic RMW operations (LDADD, LDCLR, LDEOR, LDSET, LDSMAX, LDSMIN)
@@ -48,34 +54,27 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 - ✅ Shift left overflow detection
 - ✅ Direct function calls (BL with navigation)
 - ✅ Indirect function calls (BLR from register/memory)
+- ✅ memset implementation (unrolled + loop)
+- ✅ memcpy implementation (8-byte + byte-by-byte)
 
-#### Priority 1: Memory Operations (Next Tasks)
-1. **memset implementation** - Loop generation for memory initialization
-   - Small sizes: unrolled STP instructions
-   - Large sizes: loop with counter
-   - File: src/codegen/aarch64/CodeGen_v2.zig:3731
+#### Priority 1: Memory Operations ✅ COMPLETE
 
-2. **memcpy implementation** - Loop generation for memory copying
-   - Small sizes: unrolled LDP/STP pairs
-   - Large sizes: loop with counter
-   - File: src/codegen/aarch64/CodeGen_v2.zig:3736
-
-#### Priority 2: Data Structure Support
-3. **Optional wrapping** - Tag-based optional creation
+#### Priority 2: Data Structure Support (Current Focus)
+1. **Optional wrapping** - Tag-based optional creation
    - Implement airWrapOptional
    - File: src/codegen/aarch64/CodeGen_v2.zig:1747
 
-4. **Error union wrapping** - Error union payload creation
+2. **Error union wrapping** - Error union payload creation
    - Implement airWrapErrUnionErr
    - Implement airWrapErrUnionPayload
    - File: src/codegen/aarch64/CodeGen_v2.zig:1851, 1873
 
-5. **Slice creation** - Stack-based slice construction
+3. **Slice creation** - Stack-based slice construction
    - Implement airSlice
    - File: src/codegen/aarch64/CodeGen_v2.zig:3704
 
 #### Priority 3: Extended Atomic Operations
-6. **Unsigned atomic max/min** - LDUMAX, LDUMIN instructions
+4. **Unsigned atomic max/min** - LDUMAX, LDUMIN instructions
    - Extend airAtomicRmw for .MaxU, .MinU cases
 
 ### Phase 3: Optimization & Testing - 0% Complete
@@ -108,6 +107,8 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
    - airOverflowOp(.mul): Multiply overflow (lines 3145-3254)
    - airOverflowOp(.shl): Shift overflow (lines 3255-3326)
    - airCall: Function calls (lines 2411-2623)
+   - airMemset: Memory initialization (lines 3948-4101)
+   - airMemcpy: Memory copying (lines 4103-4296)
 
 2. **src/codegen/aarch64/Mir_v2.zig**
    - Added .nav ops type (line 455)
@@ -117,8 +118,6 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
    - encodeBl: Already existed, emits BL with offset 0
 
 ### Critical TODOs Remaining
-- src/codegen/aarch64/CodeGen_v2.zig:3731 - memset
-- src/codegen/aarch64/CodeGen_v2.zig:3736 - memcpy
 - src/codegen/aarch64/CodeGen_v2.zig:1747 - airWrapOptional
 - src/codegen/aarch64/CodeGen_v2.zig:1851 - airWrapErrUnionErr
 - src/codegen/aarch64/CodeGen_v2.zig:1873 - airWrapErrUnionPayload
@@ -126,35 +125,32 @@ All basic arithmetic, logical, shifts, loads, stores implemented.
 
 ## Statistics
 
-### This Session (Commits: dacf34cd, 596413ab, e1736d2f)
-- Lines added: ~362
-- Lines modified: ~39
-- TODOs resolved: 6
+### This Session (Commits: dacf34cd, 596413ab, e1736d2f, e29bd258)
+- Lines added: ~706
+- Lines modified: ~48
+- TODOs resolved: 8
 - Build: SUCCESSFUL
 
 ### Cumulative Progress
-- Total commits: 48
-- Implementation: 95+ AIR instructions
-- Coverage: ~82% of Phase 2
+- Total commits: 49
+- Implementation: 97+ AIR instructions
+- Coverage: ~88% of Phase 2
 - Build: SUCCESSFUL
 
 ## Next Steps (in order of priority)
 
-1. **Implement memset/memcpy** - Critical for memory operations
-   - Small size optimization with unrolled instructions
-   - Loop-based implementation for large sizes
-
-2. **Implement data structure support** - Optional, error unions, slices
+1. **Implement data structure support** - Optional, error unions, slices
    - These are blocking many higher-level Zig features
 
-3. **Write tests** - Ensure correctness of implemented features
+2. **Write tests** - Ensure correctness of implemented features
    - Atomic operations tests
    - Overflow detection tests
    - Function call tests
+   - Memory operation tests (memset/memcpy)
 
-4. **Complete remaining TODOs** - Clean up any edge cases
+3. **Complete remaining TODOs** - Clean up any edge cases
 
-5. **Optimization pass** - Improve code generation quality
+4. **Optimization pass** - Improve code generation quality
 
 ## Technical Notes
 
