@@ -6267,6 +6267,47 @@ fn genSetMem(self: *CodeGen, inst: Air.Inst.Index, ptr_mcv: MCValue, ptr_off: i3
                         } },
                     });
                 },
+                .load_frame => |src_frame| {
+                    // Load from source frame location, then store to destination
+                    const tmp_reg = try self.register_manager.allocReg(inst, .gp);
+                    defer self.register_manager.freeReg(tmp_reg);
+
+                    // Load from source frame
+                    const ldr_tag: Mir.Inst.Tag = switch (src_size) {
+                        1 => .ldrb,
+                        2 => .ldrh,
+                        4 => .ldr,
+                        8 => .ldr,
+                        else => return self.fail("TODO: genSetMem frame load with size {}", .{src_size}),
+                    };
+
+                    try self.addInst(.{
+                        .tag = ldr_tag,
+                        .ops = .rm,
+                        .data = .{ .rm = .{
+                            .rd = tmp_reg,
+                            .mem = Memory.simple(.x29, -src_frame.off),
+                        } },
+                    });
+
+                    // Store to destination frame
+                    const str_tag: Mir.Inst.Tag = switch (src_size) {
+                        1 => .strb,
+                        2 => .strh,
+                        4 => .str,
+                        8 => .str,
+                        else => return self.fail("TODO: genSetMem frame store with size {}", .{src_size}),
+                    };
+
+                    try self.addInst(.{
+                        .tag = str_tag,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = Memory.simple(.x29, -eff_off),
+                            .rs = tmp_reg,
+                        } },
+                    });
+                },
                 else => return self.fail("TODO: genSetMem frame with src {s}", .{@tagName(src_mcv)}),
             }
         },
