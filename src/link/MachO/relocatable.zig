@@ -29,21 +29,6 @@ pub fn flushObject(macho_file: *MachO, comp: *Compilation, module_obj_path: ?Pat
             return diags.fail("failed to copy range of file {f}: {s}", .{ path, @errorName(err) });
         if (amt != stat.size)
             return diags.fail("unexpected short write in copy range of file {f}", .{path});
-
-        // CRITICAL: The copied file may have a zero header (from ARM64 backend).
-        // We must write a proper Mach-O header. Read the copied file to get load commands info.
-        var header: macho.mach_header_64 = undefined;
-        const bytes_read = macho_file.base.file.?.preadAll(std.mem.asBytes(&header), 0) catch |err| {
-            return diags.fail("failed to read header from output file: {s}", .{@errorName(err)});
-        };
-        if (bytes_read != @sizeOf(macho.mach_header_64)) {
-            return diags.fail("incomplete header read: expected {d} bytes, got {d}", .{ @sizeOf(macho.mach_header_64), bytes_read });
-        }
-
-        // Write proper header with magic number
-        const ncmds = header.ncmds;
-        const sizeofcmds = header.sizeofcmds;
-        try writeHeader(macho_file, ncmds, sizeofcmds);
         return;
     }
 
@@ -485,7 +470,9 @@ fn allocateSections(macho_file: *MachO) !void {
         header.size = 0;
         const alignment = try macho_file.alignPow(header.@"align");
         if (!header.isZerofill()) {
-            if (needed_size > macho_file.allocatedSize(header.offset)) {
+            // CRITICAL FIX: Always reallocate if offset==0 to prevent overwriting Mach-O header.
+            // ZigObject initializes sections with offset=0, and we must move them to after header+load commands.
+            if (needed_size > macho_file.allocatedSize(header.offset) or header.offset == 0) {
                 header.offset = try macho_file.cast(u32, try macho_file.findFreeSpace(needed_size, alignment));
             }
         }
