@@ -222,6 +222,21 @@ const FrameAlloc = struct {
             .alignment = spec.alignment,
         };
     }
+
+    fn initSpill(ty: Type, zcu: *Zcu) FrameAlloc {
+        const abi_size = ty.abiSize(zcu);
+        const abi_align = ty.abiAlignment(zcu);
+        const spill_size = if (abi_size < 8)
+            std.math.ceilPowerOfTwoAssert(u64, abi_size)
+        else
+            std.mem.alignForward(u64, abi_size, 8);
+        return init(.{
+            .size = spill_size,
+            .alignment = abi_align.maxStrict(
+                InternPool.Alignment.fromNonzeroByteUnits(@min(spill_size, 8)),
+            ),
+        });
+    }
 };
 
 /// Calling convention values - parameter and return value locations
@@ -841,7 +856,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .ptr_elem_ptr => self.airPtrElemPtr(inst),
         .ptr_elem_val => self.airPtrElemVal(inst),
         .array_elem_val => self.airArrayElemVal(inst),
-        .aggregate_init => return self.fail("TODO: ARM64 CodeGen aggregate_init", .{}),
+        .aggregate_init => self.airAggregateInit(inst),
 
         // Slice operations
         .slice_elem_val => return self.fail("TODO: ARM64 CodeGen slice_elem_val", .{}),
@@ -4830,6 +4845,72 @@ fn airArrayToSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register_pair = .{ ptr_reg, len_reg } }));
 }
 
+fn airAggregateInit(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const zcu = self.pt.zcu;
+    const result_ty = self.typeOfIndex(inst);
+    const len: usize = @intCast(result_ty.arrayLen(zcu));
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const elements: []const Air.Inst.Ref = @ptrCast(self.air.extra.items[ty_pl.payload..][0..len]);
+
+    const result: MCValue = result: {
+        switch (result_ty.zigTypeTag(zcu)) {
+            .@"struct" => {
+                const frame_index = try self.allocFrameIndex(FrameAlloc.initSpill(result_ty, zcu));
+
+                // For now, only support non-packed structs
+                if (result_ty.containerLayout(zcu) == .@"packed") {
+                    return self.fail("TODO: ARM64 airAggregateInit packed structs", .{});
+                }
+
+                // Initialize each struct field
+                for (elements, 0..) |elem, elem_i| {
+                    if ((try result_ty.structFieldValueComptime(self.pt, elem_i)) != null) continue;
+
+                    const elem_ty = result_ty.fieldType(elem_i, zcu);
+                    const elem_off: i32 = @intCast(result_ty.structFieldOffset(elem_i, zcu));
+                    const elem_mcv = try self.resolveInst(elem.toIndex().?);
+                    try self.genSetMem(.{ .frame = .{ .index = frame_index, .off = 0 } }, elem_off, elem_ty, elem_mcv);
+                }
+                break :result .{ .load_frame = .{ .index = frame_index, .off = 0 } };
+            },
+            .array => {
+                const elem_ty = result_ty.childType(zcu);
+                const frame_index = try self.allocFrameIndex(FrameAlloc.initSpill(result_ty, zcu));
+                const elem_size: u32 = @intCast(elem_ty.abiSize(zcu));
+
+                // Initialize each array element
+                for (elements, 0..) |elem, elem_i| {
+                    const elem_mcv = try self.resolveInst(elem.toIndex().?);
+                    const elem_off: i32 = @intCast(elem_size * elem_i);
+                    try self.genSetMem(
+                        .{ .frame = .{ .index = frame_index, .off = 0 } },
+                        elem_off,
+                        elem_ty,
+                        elem_mcv,
+                    );
+                }
+
+                // Handle sentinel if present
+                if (result_ty.sentinel(zcu)) |sentinel_val| {
+                    const sentinel_off: i32 = @intCast(elem_size * elements.len);
+                    // For now, assume sentinel is an immediate value
+                    const sentinel_mcv: MCValue = .{ .immediate = sentinel_val.toUnsignedInt(zcu) };
+                    try self.genSetMem(
+                        .{ .frame = .{ .index = frame_index, .off = 0 } },
+                        sentinel_off,
+                        elem_ty,
+                        sentinel_mcv,
+                    );
+                }
+                break :result .{ .load_frame = .{ .index = frame_index, .off = 0 } };
+            },
+            else => return self.fail("TODO: ARM64 airAggregateInit {s}", .{@tagName(result_ty.zigTypeTag(zcu))}),
+        }
+    };
+
+    try self.inst_tracking.put(self.gpa, inst, .init(result));
+}
+
 fn airMemset(self: *CodeGen, inst: Air.Inst.Index) !void {
     const pt = self.pt;
     const zcu = pt.zcu;
@@ -5529,6 +5610,115 @@ fn typeOf(self: *CodeGen, inst: Air.Inst.Ref) Type {
 
 fn typeOfIndex(self: *CodeGen, inst: Air.Inst.Index) Type {
     return self.air.typeOfIndex(inst, &self.pt.zcu.intern_pool);
+}
+
+// ============================================================================
+// Frame Allocation
+// ============================================================================
+
+/// Allocate a frame index for stack-based values
+fn allocFrameIndex(self: *CodeGen, alloc: FrameAlloc) !FrameIndex {
+    const frame_allocs_slice = self.frame_allocs.slice();
+    const frame_size = frame_allocs_slice.items(.size);
+    const frame_align = frame_allocs_slice.items(.alignment);
+
+    // Update stack_frame alignment
+    const stack_frame_align = &frame_align[@intFromEnum(FrameIndex.stack_frame)];
+    stack_frame_align.* = stack_frame_align.max(alloc.alignment);
+
+    // Try to reuse a freed frame index with matching size
+    for (self.free_frame_indices.keys(), 0..) |frame_index, free_i| {
+        const size = frame_size[@intFromEnum(frame_index)];
+        if (size != alloc.size) continue;
+        const abi_align = &frame_align[@intFromEnum(frame_index)];
+        abi_align.* = abi_align.max(alloc.alignment);
+
+        _ = self.free_frame_indices.swapRemoveAt(free_i);
+        log.debug("reused frame {}", .{frame_index});
+        return frame_index;
+    }
+
+    // Allocate new frame index
+    const frame_index: FrameIndex = @enumFromInt(self.frame_allocs.len);
+    try self.frame_allocs.append(self.gpa, alloc);
+    log.debug("allocated frame {}", .{frame_index});
+    return frame_index;
+}
+
+/// Write a value to memory (frame or register-indirect)
+fn genSetMem(self: *CodeGen, ptr_mcv: MCValue, ptr_off: i32, src_ty: Type, src_mcv: MCValue) !void {
+    const zcu = self.pt.zcu;
+    const src_size = src_ty.abiSize(zcu);
+
+    switch (ptr_mcv) {
+        .frame => |frame_addr| {
+            // Calculate effective offset
+            const eff_off = frame_addr.off + ptr_off;
+
+            switch (src_mcv) {
+                .immediate => |imm| {
+                    // Load immediate into temporary register
+                    const tmp_reg = try self.register_manager.allocReg(null, .gp);
+                    defer self.register_manager.freeReg(tmp_reg);
+
+                    // Load immediate
+                    try self.addInst(.{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{
+                            .rd = tmp_reg,
+                            .imm = @intCast(imm & 0xFFFF),
+                        } },
+                    });
+
+                    // Store to frame
+                    const str_tag: Mir.Inst.Tag = switch (src_size) {
+                        1 => .strb,
+                        2 => .strh,
+                        4 => .str,
+                        8 => .str,
+                        else => return self.fail("TODO: genSetMem frame with size {}", .{src_size}),
+                    };
+
+                    try self.addInst(.{
+                        .tag = str_tag,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = .{
+                                .base = .{ .reg = .x29 }, // Frame pointer
+                                .mod = .{ .immediate = -eff_off },
+                            },
+                            .rs = tmp_reg,
+                        } },
+                    });
+                },
+                .register => |reg| {
+                    // Store register to frame
+                    const str_tag: Mir.Inst.Tag = switch (src_size) {
+                        1 => .strb,
+                        2 => .strh,
+                        4 => .str,
+                        8 => .str,
+                        else => return self.fail("TODO: genSetMem frame with size {}", .{src_size}),
+                    };
+
+                    try self.addInst(.{
+                        .tag = str_tag,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = .{
+                                .base = .{ .reg = .x29 }, // Frame pointer
+                                .mod = .{ .immediate = -eff_off },
+                            },
+                            .rs = reg,
+                        } },
+                    });
+                },
+                else => return self.fail("TODO: genSetMem frame with src {s}", .{@tagName(src_mcv)}),
+            }
+        },
+        else => return self.fail("TODO: genSetMem with ptr {s}", .{@tagName(ptr_mcv)}),
+    }
 }
 
 // ============================================================================
