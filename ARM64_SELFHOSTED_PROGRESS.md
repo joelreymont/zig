@@ -35,7 +35,14 @@
    - Handles slices and multi-register values in function calls
    - **Result**: Fixes compiler_rt/clear_cache.zig compilation
 
-6. **Critical AIR Instructions** (commit a4df673839)
+6. **Block Instruction Tracking** (commit 776c2bdea2)
+   - File: `src/codegen/aarch64/CodeGen_v2.zig:196-3735`
+   - Added `result: MCValue` field to BlockData struct (line 202)
+   - Modified airBr() to resolve and store operand values (lines 2985-2994)
+   - Modified airBlock() to track block result after processing body (line 3734)
+   - **Result**: Block values now propagate correctly, eliminated most tracking errors
+
+7. **Critical AIR Instructions** (commit a4df673839)
    - **airTry** - Error handling with conditional branching (lines 2589-2670)
      - Uses ldrh/cbnz for error checking, generates error handler branches
    - **airWrapErrUnionErr** - Error union wrapping (lines 2347-2417)
@@ -141,12 +148,12 @@ fn add(a: u32, b: u32) u32 {
 }
 ```
 
-**Result (After commit a4df673839)**:
+**Result (After commit 776c2bdea2 - Block Tracking Fix)**:
 - ✅ Compiles successfully with no AIR TODO errors
 - ✅ Generates proper Mach-O 64-bit ARM64 executable (402KB)
-- ⚠️  "Instruction 0 not tracked" warnings (tracking issue)
-- ⚠️  "Branch target 932 not found" error
-- ❌ Binary headers filled with zeros instead of Mach-O magic number
+- ✅ Block instruction tracking now works correctly
+- ⚠️  "Instruction 0 not tracked" warnings (appears 2x, down from many)
+- ❌ SIGABRT crash during linking/debug info generation (exit code 134)
 
 **Mach-O Header Bug (FIXED in commits b698605af1 + 5d13f20994)**:
 - **Issue**: Generated binaries had headers filled with zeros (magic number = 0x00000000)
