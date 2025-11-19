@@ -4869,7 +4869,7 @@ fn airAggregateInit(self: *CodeGen, inst: Air.Inst.Index) !void {
                     const elem_ty = result_ty.fieldType(elem_i, zcu);
                     const elem_off: i32 = @intCast(result_ty.structFieldOffset(elem_i, zcu));
                     const elem_mcv = try self.resolveInst(elem.toIndex().?);
-                    try self.genSetMem(.{ .frame = .{ .index = frame_index, .off = 0 } }, elem_off, elem_ty, elem_mcv);
+                    try self.genSetMem(inst, .{ .frame_addr = .{ .index = frame_index, .off = 0 } }, elem_off, elem_ty, elem_mcv);
                 }
                 break :result .{ .load_frame = .{ .index = frame_index, .off = 0 } };
             },
@@ -4883,7 +4883,8 @@ fn airAggregateInit(self: *CodeGen, inst: Air.Inst.Index) !void {
                     const elem_mcv = try self.resolveInst(elem.toIndex().?);
                     const elem_off: i32 = @intCast(elem_size * elem_i);
                     try self.genSetMem(
-                        .{ .frame = .{ .index = frame_index, .off = 0 } },
+                        inst,
+                        .{ .frame_addr = .{ .index = frame_index, .off = 0 } },
                         elem_off,
                         elem_ty,
                         elem_mcv,
@@ -4896,7 +4897,8 @@ fn airAggregateInit(self: *CodeGen, inst: Air.Inst.Index) !void {
                     // For now, assume sentinel is an immediate value
                     const sentinel_mcv: MCValue = .{ .immediate = sentinel_val.toUnsignedInt(zcu) };
                     try self.genSetMem(
-                        .{ .frame = .{ .index = frame_index, .off = 0 } },
+                        inst,
+                        .{ .frame_addr = .{ .index = frame_index, .off = 0 } },
                         sentinel_off,
                         elem_ty,
                         sentinel_mcv,
@@ -5646,19 +5648,19 @@ fn allocFrameIndex(self: *CodeGen, alloc: FrameAlloc) !FrameIndex {
 }
 
 /// Write a value to memory (frame or register-indirect)
-fn genSetMem(self: *CodeGen, ptr_mcv: MCValue, ptr_off: i32, src_ty: Type, src_mcv: MCValue) !void {
+fn genSetMem(self: *CodeGen, inst: Air.Inst.Index, ptr_mcv: MCValue, ptr_off: i32, src_ty: Type, src_mcv: MCValue) !void {
     const zcu = self.pt.zcu;
     const src_size = src_ty.abiSize(zcu);
 
     switch (ptr_mcv) {
-        .frame => |frame_addr| {
+        .frame_addr => |frame_addr| {
             // Calculate effective offset
             const eff_off = frame_addr.off + ptr_off;
 
             switch (src_mcv) {
                 .immediate => |imm| {
                     // Load immediate into temporary register
-                    const tmp_reg = try self.register_manager.allocReg(null, .gp);
+                    const tmp_reg = try self.register_manager.allocReg(inst, .gp);
                     defer self.register_manager.freeReg(tmp_reg);
 
                     // Load immediate
@@ -5684,10 +5686,7 @@ fn genSetMem(self: *CodeGen, ptr_mcv: MCValue, ptr_off: i32, src_ty: Type, src_m
                         .tag = str_tag,
                         .ops = .mr,
                         .data = .{ .mr = .{
-                            .mem = .{
-                                .base = .{ .reg = .x29 }, // Frame pointer
-                                .mod = .{ .immediate = -eff_off },
-                            },
+                            .mem = Memory.simple(.x29, -eff_off),
                             .rs = tmp_reg,
                         } },
                     });
@@ -5706,10 +5705,7 @@ fn genSetMem(self: *CodeGen, ptr_mcv: MCValue, ptr_off: i32, src_ty: Type, src_m
                         .tag = str_tag,
                         .ops = .mr,
                         .data = .{ .mr = .{
-                            .mem = .{
-                                .base = .{ .reg = .x29 }, // Frame pointer
-                                .mod = .{ .immediate = -eff_off },
-                            },
+                            .mem = Memory.simple(.x29, -eff_off),
                             .rs = reg,
                         } },
                     });
