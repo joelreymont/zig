@@ -52,6 +52,7 @@ pub fn encode(inst: Mir.Inst) Error!Instruction {
         .fsub => encodeFsub(inst),
         .fmul => encodeFmul(inst),
         .fdiv => encodeFdiv(inst),
+        .fmov => encodeFmov(inst),
 
         // Load/Store
         .ldr => encodeLdr(inst),
@@ -1131,6 +1132,20 @@ fn encodeFdiv(inst: Mir.Inst) Error!Instruction {
             .Rd = @enumFromInt(data.rd.id()),
             .Rn = @enumFromInt(data.rn.id()),
             .Rm = @enumFromInt(data.rm.id()),
+            .ftype = .double,
+        },
+    } } };
+}
+
+fn encodeFmov(inst: Mir.Inst) Error!Instruction {
+    const data = inst.data.rr;
+    // FMOV Dd, Dn (scalar floating point move, double precision)
+    // TODO: Handle different float sizes (f16, f32, f64)
+    // For now, assume f64 (double precision)
+    return .{ .data_processing_vector = .{ .float_data_processing_one_source = .{
+        .fmov = .{
+            .Rd = @enumFromInt(data.rd.id()),
+            .Rn = @enumFromInt(data.rn.id()),
             .ftype = .double,
         },
     } } };
