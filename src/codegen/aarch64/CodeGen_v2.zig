@@ -3158,6 +3158,22 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                         });
                     }
                 },
+                .register_pair => |regs| {
+                    // For register_pair, we need to check if this is a multi-register argument
+                    // or if we just need to extract one register from the pair
+                    // For now, assume we need the first register (common for slices/pairs)
+                    const src_reg = regs[0];
+                    if (src_reg.id() != arg_reg.id()) {
+                        try self.addInst(.{
+                            .tag = .mov,
+                            .ops = .rr,
+                            .data = .{ .rr = .{
+                                .rd = arg_reg,
+                                .rn = src_reg,
+                            } },
+                        });
+                    }
+                },
                 else => return self.fail("TODO: ARM64 airCall with arg type {}", .{arg_mcv}),
             }
         } else {
@@ -3196,6 +3212,18 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                         .data = .{ .mr = .{
                             .mem = Memory.simple(.sp, stack_offset),
                             .rs = temp,
+                        } },
+                    });
+                },
+                .register_pair => |regs| {
+                    // For register_pair on stack, store the first register
+                    // (This handles cases like slices where we pass the pointer)
+                    try self.addInst(.{
+                        .tag = .str,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = Memory.simple(.sp, stack_offset),
+                            .rs = regs[0],
                         } },
                     });
                 },
