@@ -682,7 +682,9 @@ fn writeSectionsToFile(macho_file: *MachO) !void {
     defer tracy.end();
 
     const slice = macho_file.sections.slice();
-    for (slice.items(.header), slice.items(.out), slice.items(.relocs)) |header, out, relocs| {
+    std.debug.print("DEBUG writeSectionsToFile: writing {d} sections\n", .{slice.items(.header).len});
+    for (slice.items(.header), slice.items(.out), slice.items(.relocs), 0..) |header, out, relocs, i| {
+        std.debug.print("DEBUG writeSectionsToFile: section[{d}] offset={d} size={d}\n", .{ i, header.offset, header.size });
         try macho_file.pwriteAll(out.items, header.offset);
         try macho_file.pwriteAll(@ptrCast(relocs.items), header.reloff);
     }
@@ -750,6 +752,7 @@ fn writeLoadCommands(macho_file: *MachO) error{ LinkFailure, OutOfMemory }!struc
 }
 
 fn writeHeader(macho_file: *MachO, ncmds: usize, sizeofcmds: usize) !void {
+    std.debug.print("DEBUG writeHeader: Writing header at offset 0 with magic=0x{x}\n", .{macho.MH_MAGIC_64});
     var header: macho.mach_header_64 = .{};
     header.magic = macho.MH_MAGIC_64;
     header.filetype = macho.MH_OBJECT;
