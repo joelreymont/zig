@@ -2119,11 +2119,15 @@ fn initSegments(self: *MachO) !void {
         index: u8,
 
         pub fn lessThan(macho_file: *MachO, lhs: @This(), rhs: @This()) bool {
-            return segmentLessThan(
-                {},
-                macho_file.segments.items[lhs.index].segName(),
-                macho_file.segments.items[rhs.index].segName(),
-            );
+            const lhs_seg = &macho_file.segments.items[lhs.index];
+            const rhs_seg = &macho_file.segments.items[rhs.index];
+            const lhs_rank = getSegmentRank(lhs_seg.segName());
+            const rhs_rank = getSegmentRank(rhs_seg.segName());
+            if (lhs_rank == rhs_rank) {
+                // For segments with same rank, sort by VM address instead of name
+                return lhs_seg.vmaddr < rhs_seg.vmaddr;
+            }
+            return lhs_rank < rhs_rank;
         }
     };
 
