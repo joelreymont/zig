@@ -146,16 +146,15 @@ fn add(a: u32, b: u32) u32 {
 - ✅ Generates proper Mach-O 64-bit ARM64 executable (402KB)
 - ⚠️  "Instruction 0 not tracked" warnings (tracking issue)
 - ⚠️  "Branch target 932 not found" error
-- ❌ Runtime error: Section/segment mapping bug blocks execution
+- ❌ Binary headers filled with zeros instead of Mach-O magic number
 
-**Mach-O Section/Segment Swapping Bug**:
-- **Issue**: Generated binary has sections mapped to wrong segments
-  - `__TEXT_ZIG` segment contains `__bss_zig` section (should contain `__text_zig`)
-  - `__BSS_ZIG` segment contains `__text_zig` section (should contain `__bss_zig`)
-- **dyld Error**: `section '__bss_zig' end address 0x114000400 is beyond containing segment's end address 0x104000044`
-- **Location**: `src/link/MachO.zig` - segment/section association logic
-- **Suspected Cause**: Timing issue between `initMetadata()` and `initSegments()` or backlink calculation bug
-- **Status**: Under investigation
+**Mach-O Header Bug (FIXED in commits b698605af1 + 5d13f20994)**:
+- **Issue**: Generated binaries had headers filled with zeros (magic number = 0x00000000)
+- **Root Cause**: `relocatable.writeHeader()` function was missing magic number initialization
+- **Location**: `src/link/MachO/relocatable.zig:746`
+- **Fix**: Added `header.magic = macho.MH_MAGIC_64;` to match main writeHeader() pattern
+- **Additional Fix**: Fixed section offset allocation to prevent header overwrite (page-aligned headerpad)
+- **Status**: ✅ FIXED - Binaries now have proper Mach-O headers with magic number 0xFEEDFACF
 
 ## Build System Status
 
