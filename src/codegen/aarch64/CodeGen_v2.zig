@@ -759,6 +759,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .add_wrap => self.airAdd(inst),  // Wrapping is default behavior
         .sub_wrap => self.airSub(inst),  // Wrapping is default behavior
         .mul => self.airMul(inst),
+        .mul_wrap => self.airMulWrap(inst),
         .div_trunc, .div_exact => self.airDiv(inst),
         .rem => self.airRem(inst),
         .mod => self.airMod(inst),
@@ -1067,6 +1068,34 @@ fn airMul(self: *CodeGen, inst: Air.Inst.Index) !void {
     const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
     const dst_reg = try self.register_manager.allocReg(inst, reg_class);
 
+    const tag: Mir.Inst.Tag = if (is_float) .fmul else .mul;
+    try self.addInst(.{
+        .tag = tag,
+        .ops = .rrr,
+        .data = .{ .rrr = .{
+            .rd = dst_reg,
+            .rn = lhs.register,
+            .rm = rhs.register,
+        } },
+    });
+
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airMulWrap(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const bin_op = self.air.instructions.items(.data)[@intFromEnum(inst)].bin_op;
+
+    const lhs = try self.resolveInst(bin_op.lhs.toIndex().?);
+    const rhs = try self.resolveInst(bin_op.rhs.toIndex().?);
+
+    // Check if this is a float operation
+    const result_ty = self.typeOfIndex(inst);
+    const is_float = result_ty.isRuntimeFloat();
+
+    const reg_class: abi.RegisterClass = if (is_float) .vector else .gp;
+    const dst_reg = try self.register_manager.allocReg(inst, reg_class);
+
+    // Wrapping multiplication is the default behavior on ARM64
     const tag: Mir.Inst.Tag = if (is_float) .fmul else .mul;
     try self.addInst(.{
         .tag = tag,
