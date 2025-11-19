@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-1399fb41 - Fix Mach-O segment VM address ordering on macOS ARM64
+4fd2d988 - Add Mach-O segment ordering fix documentation and test script
 
 ## Session Status: ACTIVE
 
@@ -234,13 +234,14 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
    - Direct emission of pre-encoded instructions
 
 ### Session Statistics
-- Total commits this session: 18 (15 Linux + 3 macOS)
-- Lines added: ~650+
-- Lines modified: ~200+
+- Total commits this session: 19 (15 Linux + 5 macOS: 110e7212, 789fe3da, 1399fb41, db823c63, 4fd2d988)
+- Lines added: ~950+ (including documentation)
+- Lines modified: ~210+
 - Major features implemented: 3 (union_init, switch_br, inline assembly)
 - Critical bugs fixed: 4 (DWARF underflow, instruction tracking, register type conversion, Mach-O segment ordering)
 - Standard library functions unblocked: 7+ (syscalls, doNotOptimizeAway, clear_cache)
 - Platforms enhanced: 2 (Linux ARM64, macOS ARM64)
+- Documentation added: 2 files (MACHO_SEGMENT_FIX.md, test_macho_fix.sh)
 
 15. ✅ **Inline Assembly Register Type Conversion** (Commit: 110e7212 - macOS session)
    - **Problem**: Type mismatch between `bits.Register` and `codegen.aarch64.encoding.Register`
@@ -278,6 +279,22 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
      * Correct order: TEXT_ZIG < CONST_ZIG < DATA_ZIG < BSS_ZIG
    - **Impact**: Enables ARM64 binaries to run on macOS (requires rebuilding zig)
    - **Status**: Fix committed, needs zig rebuild to test
+   - **Documentation**: MACHO_SEGMENT_FIX.md (comprehensive analysis)
+   - **Test Script**: test_macho_fix.sh (automated verification)
+
+17. ✅ **Mach-O Fix Documentation and Testing** (Commit: 4fd2d988 - macOS session)
+   - **Created**: MACHO_SEGMENT_FIX.md - comprehensive analysis document
+     * Problem statement and root cause explanation
+     * Before/after segment order comparison
+     * Code walkthrough showing alphabetical vs VM address sorting
+     * Verification steps and expected results
+   - **Created**: test_macho_fix.sh - automated test script
+     * Builds test program with self-hosted backend
+     * Validates segment order (ascending VM addresses)
+     * Tests binary execution
+     * Provides clear pass/fail reporting
+   - **Purpose**: Enable easy verification of fix once zig is rebuilt
+   - **Usage**: `./test_macho_fix.sh [path_to_zig_binary]`
 
 ### Build Status (macOS Session)
 - Environment: macOS ARM64 (Darwin 25.1.0)
@@ -294,6 +311,36 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
 ### References
 - DWARF bug documentation: DWARF_INTEGER_UNDERFLOW_BUG.md
 - DWARF fix patch: dwarf_unit_offset_fix.patch
+- Mach-O fix documentation: MACHO_SEGMENT_FIX.md ⭐ NEW
+- Mach-O test script: test_macho_fix.sh ⭐ NEW
 - ARM64 ISA reference: ARM Architecture Reference Manual
 - Zig AIR format: src/Air.zig
 - ARM64 Assemble parser: src/codegen/aarch64/Assemble.zig
+
+### Next Steps (For Testing)
+To verify the Mach-O segment ordering fix:
+
+1. **Build zig from source** (requires LLVM or working around build.zig compatibility):
+   ```bash
+   # Option 1: Fix build.zig API compatibility issues with system zig 0.15.1
+   # Option 2: Use zig master branch to build this branch
+   # Option 3: Wait for next zig release that includes these changes
+   ```
+
+2. **Run automated test**:
+   ```bash
+   chmod +x test_macho_fix.sh
+   ./test_macho_fix.sh ./zig-out/bin/zig
+   ```
+
+3. **Expected result**:
+   - ✅ Segments in ascending VM address order
+   - ✅ Binary executes without dyld errors
+   - ✅ "Hello from ARM64!" printed successfully
+
+### Verification Status
+- ✅ Code fix implemented and committed
+- ✅ Logic verified through analysis
+- ✅ Documentation created
+- ✅ Test script created
+- ⏳ Awaiting zig rebuild for runtime verification
