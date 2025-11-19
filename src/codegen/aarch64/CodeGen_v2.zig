@@ -339,6 +339,16 @@ pub fn generate(
 
     std.debug.print("ARM64 CodeGen: generated Mir with {d} instructions\n", .{mir.instructions.len});
 
+    // Debug: print all branch targets
+    for (mir.instructions.items(.tag), mir.instructions.items(.data), 0..) |tag, data, i| {
+        switch (tag) {
+            .b, .bl => std.debug.print("  MIR[{d}]: {s} target={d}\n", .{ i, @tagName(tag), data.rel.target }),
+            .b_cond => std.debug.print("  MIR[{d}]: {s} target={d}\n", .{ i, @tagName(tag), data.rel.target }),
+            .cbz, .cbnz => std.debug.print("  MIR[{d}]: {s} target={d}\n", .{ i, @tagName(tag), data.r_rel.target }),
+            else => {},
+        }
+    }
+
     return mir;
 }
 
