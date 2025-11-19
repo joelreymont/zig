@@ -82,7 +82,7 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
    - **IMPACT**: Atomic operations now generate FUNCTIONAL machine code!
    - **STATUS**: All 3 compiler layers complete: AIR → MIR → Machine Code ✅
 
-11. ✅ **DWARF Debug Info Investigation - COMPLETE** (Commits: eaa215cb, 356f2434, c314585a, 50a7bd4a)
+11. ✅ **DWARF Debug Info Investigation - COMPLETE** (Commits: eaa215cb, 356f2434, c314585a, 50a7bd4a, 81460c46)
    - **PROBLEM**: ARM64 DWARF generation failing with error.Unexpected
    - **CRITICAL DISCOVERY**: Bug affects ALL non-LLVM backends (x86_64, ARM64, RISC-V, etc.)
    - **Root Cause Found**: Integer underflow in Unit.resizeHeader()
@@ -91,7 +91,7 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
      - Caused unit.off -= needed_header_len to underflow when unit.off < needed_header_len
      - Example: 100 - 329 = -229, which wraps to 4294967067 as u32
      - Huge offsets (~4GB) caused file I/O failures
-   - **Fix** (Commit: [current]): Change Dwarf.zig:669 from `else 0` to `else unit.off`
+   - **Fix** (Commit: 81460c46): Change Dwarf.zig:669 from `else 0` to `else unit.off`
      - One-line fix resolves DWARF for ALL affected architectures
      - See: dwarf_unit_offset_fix.patch
    - **Supporting Fixes** (Commit: 50a7bd4a, ee2a197c):
@@ -100,6 +100,21 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
      - Comprehensive debug output to trace integer overflow
    - **Documentation**: See DWARF_INTEGER_UNDERFLOW_BUG.md for complete analysis
    - **Status**: ✅ DWARF generation now works perfectly on all backends!
+
+12. 🔄 **ARM64 CodeGen Missing Instructions - IN PROGRESS** (Current session)
+   - **Problem**: Many AIR instructions not implemented in CodeGen_v2.zig
+   - **Implemented This Session**:
+     - ✅ add_wrap / sub_wrap: Mapped to regular add/sub (wrapping is ARM64 default)
+     - ✅ union_init: Full implementation with tagged/untagged union support
+   - **Remaining TODOs** (from test output):
+     - inline assembly (.assembly -> airAsm)
+     - switch_br (switch with branch table)
+     - loop_switch_br
+     - Instruction tracking errors (inst value 0xAAAAAABA)
+   - **Architecture Discovery**: ARM64 has two codegen paths:
+     - CodeGen_v2.zig (current, older, incomplete)
+     - Select.zig (newer, more complete - has union_init, field_parent_ptr, etc.)
+   - **Next Steps**: Either complete CodeGen_v2 implementations or investigate switching to Select.zig path
 
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL

@@ -741,6 +741,8 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Arithmetic
         .add => self.airAdd(inst),
         .sub => self.airSub(inst),
+        .add_wrap => self.airAdd(inst),  // Wrapping is default behavior
+        .sub_wrap => self.airSub(inst),  // Wrapping is default behavior
         .mul => self.airMul(inst),
         .div_trunc, .div_exact => self.airDiv(inst),
         .rem => self.airRem(inst),
@@ -867,6 +869,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .wrap_errunion_payload => self.airWrapErrUnionPayload(inst),
 
         // Union operations
+        .union_init => self.airUnionInit(inst),
         .get_union_tag => self.airGetUnionTag(inst),
 
         // Blocks
@@ -4092,6 +4095,133 @@ fn airBoolOr(self: *CodeGen, inst: Air.Inst.Index) !void {
     });
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = dst_reg }));
+}
+
+fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const extra = self.air.extraData(Air.UnionInit, ty_pl.payload).data;
+    const union_ty = ty_pl.ty.toType();
+    const field_index = extra.field_index;
+    const init_val = try self.resolveInst(extra.init.toIndex().?);
+
+    const zcu = self.pt.zcu;
+    const layout = union_ty.unionGetLayout(zcu);
+
+    // Allocate stack space for the union
+    const stack_offset = self.max_stack_size;
+    const union_abi_size: u32 = @intCast(union_ty.abiSize(zcu));
+    self.max_stack_size = stack_offset + union_abi_size;
+
+    // Get the stack pointer for the union
+    const sp_reg = try self.register_manager.allocReg(null, .gp);
+
+    // Calculate SP + stack_offset and store in sp_reg
+    if (stack_offset <= 4095) {
+        try self.addInst(.{
+            .tag = .add_immediate,
+            .ops = .rri,
+            .data = .{ .rri = .{
+                .rd = sp_reg,
+                .rn = .sp,
+                .imm = stack_offset,
+            } },
+        });
+    } else {
+        // Load large offset into temp register
+        const tmp_reg = try self.register_manager.allocReg(null, .gp);
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = tmp_reg,
+                .imm = @intCast(stack_offset & 0xFFFF),
+            } },
+        });
+        if (stack_offset > 0xFFFF) {
+            try self.addInst(.{
+                .tag = .movk,
+                .ops = .ri_shift,
+                .data = .{ .ri_shift = .{
+                    .rd = tmp_reg,
+                    .imm = @intCast((stack_offset >> 16) & 0xFFFF),
+                    .shift = 16,
+                } },
+            });
+        }
+        try self.addInst(.{
+            .tag = .add,
+            .ops = .rrr,
+            .data = .{ .rrr = .{
+                .rd = sp_reg,
+                .rn = .sp,
+                .rm = tmp_reg,
+            } },
+        });
+    }
+
+    // If tagged union, store the tag first
+    if (layout.tag_size > 0) {
+        const tag_off: i32 = @intCast(layout.tag_align.forward(layout.payload_size));
+        const tag_reg = try self.register_manager.allocReg(null, .gp);
+
+        // Load field index as tag value
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = tag_reg,
+                .imm = @intCast(field_index),
+            } },
+        });
+
+        // Store tag at union + tag_offset
+        try self.addInst(.{
+            .tag = if (layout.tag_size <= 1) .strb else if (layout.tag_size <= 2) .strh else .str,
+            .ops = .rm,
+            .data = .{ .rm = .{
+                .rt = tag_reg,
+                .mem = Memory.simple(sp_reg, tag_off),
+            } },
+        });
+    }
+
+    // Store the payload value at the union base
+    const payload_off: i32 = @intCast(layout.payloadOffset());
+    switch (init_val) {
+        .register => |reg| {
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .rm,
+                .data = .{ .rm = .{
+                    .rt = reg,
+                    .mem = Memory.simple(sp_reg, payload_off),
+                } },
+            });
+        },
+        .immediate => |imm| {
+            const temp_reg = try self.register_manager.allocReg(null, .gp);
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{
+                    .rd = temp_reg,
+                    .imm = @intCast(imm & 0xFFFF),
+                } },
+            });
+            try self.addInst(.{
+                .tag = .str,
+                .ops = .rm,
+                .data = .{ .rm = .{
+                    .rt = temp_reg,
+                    .mem = Memory.simple(sp_reg, payload_off),
+                } },
+            });
+        },
+        else => return self.fail("TODO: ARM64 union_init for MCValue type {s}", .{@tagName(init_val)}),
+    }
+
+    // Track the result as a stack offset
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .stack_offset = stack_offset }));
 }
 
 fn airGetUnionTag(self: *CodeGen, inst: Air.Inst.Index) !void {
