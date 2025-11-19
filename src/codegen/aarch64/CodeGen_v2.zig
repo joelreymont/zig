@@ -900,6 +900,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         // Blocks
         .block => self.airBlock(inst),
         .loop => self.airLoop(inst),
+        .repeat => self.airRepeat(inst),
 
         // Function arguments
         .arg => self.airArg(inst),
@@ -3112,6 +3113,24 @@ fn airLoop(self: *CodeGen, inst: Air.Inst.Index) !void {
     // The repeat instruction in the body will jump back to loop_start
     // Store loop_start for use by repeat instructions
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .immediate = loop_start }));
+}
+
+fn airRepeat(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const repeat_data = self.air.instructions.items(.data)[@intFromEnum(inst)].repeat;
+
+    // Get the loop start position from the loop instruction
+    const loop_mcv = try self.resolveInst(repeat_data.loop_inst);
+    const loop_start: Mir.Inst.Index = switch (loop_mcv) {
+        .immediate => |imm| @intCast(imm),
+        else => return self.fail("Loop start not an immediate: {s}", .{@tagName(loop_mcv)}),
+    };
+
+    // Emit unconditional branch back to loop start
+    try self.addInst(.{
+        .tag = .b,
+        .ops = .rel,
+        .data = .{ .rel = .{ .target = loop_start } },
+    });
 }
 
 fn airSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
