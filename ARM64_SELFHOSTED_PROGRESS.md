@@ -57,6 +57,20 @@
    - **encodeFmov** - Floating point move encoding (encoder.zig:1140-1152)
    - **Result**: Generates proper Mach-O executables (not "data" files)
 
+8. **Branch Target Offset Calculation** (commit 2c0c45881a)
+   - File: `src/codegen/aarch64/Lower.zig:70-81`
+   - Fixed critical bug where all MIR instructions were mapped to offset 0
+   - Added local counter that increments for each non-pseudo instruction
+   - **Issue**: First pass used `self.instructions.items.len` which was always 0
+   - **Result**: Branch relocations now resolve correctly
+
+9. **Loop Support (airRepeat)** (commit 059bcca438)
+   - File: `src/codegen/aarch64/CodeGen_v2.zig:903,3118-3134`
+   - Implemented `airRepeat` AIR instruction for loop backward jumps
+   - Resolves loop start position from loop instruction tracking
+   - Generates unconditional branch (B) back to loop start
+   - **Result**: Enables compilation of code with loops
+
 ### 🚧 Remaining Work for Self-Hosted Backend
 
 The self-hosted ARM64 backend is partially implemented but missing critical AIR instruction handlers. These are needed to compile the standard library and user programs.
@@ -72,7 +86,7 @@ Priority 1 (Blocks most std library code):
 - ✅ **wrap_errunion_err** - Error union wrapping (IMPLEMENTED)
 
 Priority 2 (Common operations):
-- **repeat** - Loop control flow (requires loop state tracking infrastructure)
+- ✅ **repeat** - Loop control flow (IMPLEMENTED)
 - ✅ **mul_wrap** - Wrapping multiplication (IMPLEMENTED)
 - ✅ **slice_elem_val** - Slice element access (IMPLEMENTED)
 - ✅ **error_name** - Error name lookup (IMPLEMENTED - needs symbol resolution)
