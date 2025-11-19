@@ -847,6 +847,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .slice_len => self.airSliceLen(inst),
         .ptr_slice_ptr_ptr => self.airPtrSlicePtrPtr(inst),
         .ptr_slice_len_ptr => self.airPtrSliceLenPtr(inst),
+        .array_to_slice => self.airArrayToSlice(inst),
 
         // Optional handling
         .is_null => self.airIsNull(inst, true),
@@ -4762,6 +4763,63 @@ fn airSliceLen(self: *CodeGen, inst: Air.Inst.Index) !void {
     };
 
     try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = len_reg }));
+}
+
+fn airArrayToSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
+    const ty_op = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_op;
+    const zcu = self.pt.zcu;
+
+    // Get the pointer to the array
+    const array_ptr_mcv = try self.resolveInst(ty_op.operand.toIndex().?);
+    const ptr_ty = self.typeOf(ty_op.operand);
+    const array_ty = ptr_ty.childType(zcu);
+    const array_len = array_ty.arrayLen(zcu);
+
+    // Get pointer in a register
+    const ptr_reg = switch (array_ptr_mcv) {
+        .register => |reg| reg,
+        else => return self.fail("TODO: array_to_slice with ptr MCValue {s}", .{@tagName(array_ptr_mcv)}),
+    };
+
+    // Allocate a register for the length
+    const len_reg = try self.register_manager.allocReg(inst, .gp);
+
+    // Load the array length into the length register
+    // MOV len_reg, #array_len (or use MOVZ for larger values)
+    if (array_len <= 0xFFFF) {
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = len_reg,
+                .imm = @intCast(array_len),
+            } },
+        });
+    } else {
+        // For larger lengths, we need to build the value in multiple steps
+        try self.addInst(.{
+            .tag = .movz,
+            .ops = .ri,
+            .data = .{ .ri = .{
+                .rd = len_reg,
+                .imm = @intCast(array_len & 0xFFFF),
+            } },
+        });
+        if ((array_len >> 16) & 0xFFFF != 0) {
+            try self.addInst(.{
+                .tag = .movk,
+                .ops = .ri_shift,
+                .data = .{ .ri_shift = .{
+                    .rd = len_reg,
+                    .imm = @intCast((array_len >> 16) & 0xFFFF),
+                    .shift = 16,
+                } },
+            });
+        }
+    }
+
+    // Return slice as a register pair: {pointer, length}
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register_pair = .{ ptr_reg, len_reg } }));
 }
 
 fn airMemset(self: *CodeGen, inst: Air.Inst.Index) !void {
