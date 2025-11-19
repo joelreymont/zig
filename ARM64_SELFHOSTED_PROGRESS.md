@@ -35,6 +35,21 @@
    - Handles slices and multi-register values in function calls
    - **Result**: Fixes compiler_rt/clear_cache.zig compilation
 
+6. **Critical AIR Instructions** (commit a4df673839)
+   - **airTry** - Error handling with conditional branching (lines 2589-2670)
+     - Uses ldrh/cbnz for error checking, generates error handler branches
+   - **airWrapErrUnionErr** - Error union wrapping (lines 2347-2417)
+     - Allocates stack frame, stores error value, zero-initializes payload
+   - **airErrorName** - Error name lookup (lines 2676-2778)
+     - Table lookup implementation (requires symbol resolution infrastructure)
+   - **airSliceElemVal** - Slice element access (lines 5080-5209)
+     - Bounds checking and element value loading
+   - **airFieldParentPtr** - Parent pointer calculation (lines 1380-1415)
+     - Subtracts field offset from field pointer
+   - **mul_wrap**, **div_float** support added
+   - **encodeFmov** - Floating point move encoding (encoder.zig:1140-1152)
+   - **Result**: Generates proper Mach-O executables (not "data" files)
+
 ### 🚧 Remaining Work for Self-Hosted Backend
 
 The self-hosted ARM64 backend is partially implemented but missing critical AIR instruction handlers. These are needed to compile the standard library and user programs.
@@ -46,20 +61,21 @@ The self-hosted ARM64 backend is partially implemented but missing critical AIR 
 Priority 1 (Blocks most std library code):
 - ✅ **array_to_slice** - Array to slice conversions (IMPLEMENTED)
 - ✅ **aggregate_init** - Struct/array initialization (IMPLEMENTED)
-- **try** - Error handling expressions
-- **wrap_errunion_err** - Error union wrapping
+- ✅ **try** - Error handling expressions (IMPLEMENTED)
+- ✅ **wrap_errunion_err** - Error union wrapping (IMPLEMENTED)
 
 Priority 2 (Common operations):
 - **repeat** - Loop control flow (requires loop state tracking infrastructure)
-- **mul_wrap** - Wrapping multiplication
-- **slice_elem_val** - Slice element access
-- **error_name** - Error name lookup
-- **field_parent_ptr** - Parent pointer from field
-- **dbg_empty_stmt** - Debug statement markers
+- ✅ **mul_wrap** - Wrapping multiplication (IMPLEMENTED)
+- ✅ **slice_elem_val** - Slice element access (IMPLEMENTED)
+- ✅ **error_name** - Error name lookup (IMPLEMENTED - needs symbol resolution)
+- ✅ **field_parent_ptr** - Parent pointer from field (IMPLEMENTED)
+- ✅ **dbg_empty_stmt** - Debug statement markers (IMPLEMENTED)
+- ✅ **div_float** - Floating point division (IMPLEMENTED)
 
 Priority 3 (Advanced features):
 - ✅ **Register pair arguments** - C calling convention (IMPLEMENTED)
-- **fmov encoding** - Floating point move instruction encoding
+- ✅ **fmov encoding** - Floating point move instruction encoding (IMPLEMENTED)
 - Proper memory operands for inline assembly (currently use registers)
 
 #### Implementation Pattern
@@ -125,7 +141,21 @@ fn add(a: u32, b: u32) u32 {
 }
 ```
 
-**Result**: Similar errors, generates 385KB binary but cannot execute.
+**Result (After commit a4df673839)**:
+- ✅ Compiles successfully with no AIR TODO errors
+- ✅ Generates proper Mach-O 64-bit ARM64 executable (402KB)
+- ⚠️  "Instruction 0 not tracked" warnings (tracking issue)
+- ⚠️  "Branch target 932 not found" error
+- ❌ Runtime error: Section/segment mapping bug blocks execution
+
+**Mach-O Section/Segment Swapping Bug**:
+- **Issue**: Generated binary has sections mapped to wrong segments
+  - `__TEXT_ZIG` segment contains `__bss_zig` section (should contain `__text_zig`)
+  - `__BSS_ZIG` segment contains `__text_zig` section (should contain `__bss_zig`)
+- **dyld Error**: `section '__bss_zig' end address 0x114000400 is beyond containing segment's end address 0x104000044`
+- **Location**: `src/link/MachO.zig` - segment/section association logic
+- **Suspected Cause**: Timing issue between `initMetadata()` and `initSegments()` or backlink calculation bug
+- **Status**: Under investigation
 
 ## Build System Status
 
