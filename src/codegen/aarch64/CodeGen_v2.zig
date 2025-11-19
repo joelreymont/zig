@@ -2716,8 +2716,128 @@ fn airLoop(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 
 fn airSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
-    _ = inst;
-    return self.fail("TODO: ARM64 CodeGen switch_br", .{});
+    const switch_br = self.air.unwrapSwitch(inst);
+    const condition = try self.resolveInst(switch_br.operand);
+
+    const cond_reg = switch (condition) {
+        .register => |reg| reg,
+        .immediate => |imm| blk: {
+            const reg = try self.register_manager.allocReg(inst, .gp);
+            try self.addInst(.{
+                .tag = .movz,
+                .ops = .ri,
+                .data = .{ .ri = .{ .rd = reg, .imm = imm } },
+            });
+            break :blk reg;
+        },
+        else => return self.fail("TODO: switch_br condition type {s}", .{@tagName(condition)}),
+    };
+
+    // Collect branch fixup locations
+    var case_branches = std.ArrayList(Mir.Inst.Index).init(self.gpa);
+    defer case_branches.deinit();
+
+    // Process each case
+    var it = switch_br.iterateCases();
+    while (it.next()) |case| {
+        // For each item in the case, compare and branch if equal
+        for (case.items) |item| {
+            const item_mcv = try self.resolveInst(item);
+
+            // Allocate temp register for comparison
+            const cmp_reg = try self.register_manager.allocReg(inst, .gp);
+            defer self.register_manager.freeReg(cmp_reg);
+
+            // Compare condition with item
+            switch (item_mcv) {
+                .immediate => |imm| {
+                    // CMP cond_reg, #imm
+                    try self.addInst(.{
+                        .tag = .cmp,
+                        .ops = .rri,
+                        .data = .{ .rri = .{
+                            .rd = .xzr,
+                            .rn = cond_reg,
+                            .imm = imm,
+                        } },
+                    });
+                },
+                .register => |item_reg| {
+                    // CMP cond_reg, item_reg
+                    try self.addInst(.{
+                        .tag = .cmp,
+                        .ops = .rrr,
+                        .data = .{ .rrr = .{
+                            .rd = .xzr,
+                            .rn = cond_reg,
+                            .rm = item_reg,
+                        } },
+                    });
+                },
+                else => return self.fail("TODO: switch_br item type {s}", .{@tagName(item_mcv)}),
+            }
+
+            // Branch to case body if equal
+            const branch_idx: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+            try self.addInst(.{
+                .tag = .b_cond,
+                .ops = .rc,
+                .data = .{ .rc = .{
+                    .rn = .xzr,
+                    .cond = .eq,
+                    .target = 0, // Placeholder
+                } },
+            });
+            try case_branches.append(branch_idx);
+        }
+
+        // Skip case body - will be filled in when we process case bodies
+    }
+
+    // Generate else/default body
+    if (switch_br.else_body_len > 0) {
+        var else_it = switch_br.iterateCases();
+        while (else_it.next()) |_| {}
+        const else_body = else_it.elseBody();
+        try self.genBody(else_body);
+    }
+
+    // Jump past all case bodies
+    const end_branch_idx: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    try self.addInst(.{
+        .tag = .b,
+        .ops = .rel,
+        .data = .{ .rel = .{ .target = 0 } }, // Will be patched
+    });
+
+    // Now generate case bodies and patch branches
+    var case_idx: usize = 0;
+    var cases_it = switch_br.iterateCases();
+    while (cases_it.next()) |case| {
+        const case_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+
+        // Patch all branches for this case's items
+        for (0..case.items.len) |_| {
+            if (case_idx < case_branches.items.len) {
+                self.mir_instructions.items(.data)[case_branches.items[case_idx]].rc.target = case_start;
+                case_idx += 1;
+            }
+        }
+
+        // Generate case body
+        try self.genBody(case.body);
+
+        // Jump to end
+        try self.addInst(.{
+            .tag = .b,
+            .ops = .rel,
+            .data = .{ .rel = .{ .target = end_branch_idx } },
+        });
+    }
+
+    // Patch end branch to point here
+    const after_switch: Mir.Inst.Index = @intCast(self.mir_instructions.len);
+    self.mir_instructions.items(.data)[end_branch_idx].rel.target = after_switch;
 }
 
 fn airLoopSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
