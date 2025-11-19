@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-110e7212 - Fix register type conversions in inline assembly for ARM64
+1399fb41 - Fix Mach-O segment VM address ordering on macOS ARM64
 
 ## Session Status: ACTIVE
 
@@ -234,14 +234,15 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
    - Direct emission of pre-encoded instructions
 
 ### Session Statistics
-- Total commits this session: 16 (15 Linux + 1 macOS)
-- Lines added: ~600+
-- Lines modified: ~150+
+- Total commits this session: 18 (15 Linux + 3 macOS)
+- Lines added: ~650+
+- Lines modified: ~200+
 - Major features implemented: 3 (union_init, switch_br, inline assembly)
-- Critical bugs fixed: 3 (DWARF underflow, instruction tracking, register type conversion)
+- Critical bugs fixed: 4 (DWARF underflow, instruction tracking, register type conversion, Mach-O segment ordering)
 - Standard library functions unblocked: 7+ (syscalls, doNotOptimizeAway, clear_cache)
+- Platforms enhanced: 2 (Linux ARM64, macOS ARM64)
 
-15. ✅ **Inline Assembly Register Type Conversion** (Commit: 110e7212)
+15. ✅ **Inline Assembly Register Type Conversion** (Commit: 110e7212 - macOS session)
    - **Problem**: Type mismatch between `bits.Register` and `codegen.aarch64.encoding.Register`
    - **Discovery**: airAsm() uses two incompatible register type systems:
      * `bits.Register` - Simple enum(u8) for internal register tracking
@@ -259,6 +260,25 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
    - **Verification**: Successfully compiled test programs with inline assembly
    - **Result**: zig2.c generated successfully for aarch64-macos target (247MB)
 
+16. ✅ **Mach-O Segment VM Address Ordering Fix** (Commit: 1399fb41 - macOS session)
+   - **Problem**: Self-hosted ARM64 binaries fail to execute on macOS
+     * Error: "segment '__CONST_ZIG' vm address out of order"
+     * macOS dyld requires segments in ascending VM address order
+   - **Root Cause**: Segments sorted alphabetically instead of by VM address
+     * ZIG segments all get rank 0xe (same rank)
+     * When ranks equal, segmentLessThan() sorted alphabetically:
+       - __BSS_ZIG (0x114000000) - first alphabetically
+       - __CONST_ZIG (0x10c000000) - out of order
+       - __DATA_ZIG (0x110000000) - out of order
+       - __TEXT_ZIG (0x104000000) - last alphabetically
+     * VM addresses not ascending: BSS_ZIG > CONST_ZIG violates order
+   - **Solution**:
+     * Modified Entry.lessThan() in initSegments() (src/link/MachO.zig:2121-2131)
+     * When segments have equal rank: sort by vmaddr instead of name
+     * Correct order: TEXT_ZIG < CONST_ZIG < DATA_ZIG < BSS_ZIG
+   - **Impact**: Enables ARM64 binaries to run on macOS (requires rebuilding zig)
+   - **Status**: Fix committed, needs zig rebuild to test
+
 ### Build Status (macOS Session)
 - Environment: macOS ARM64 (Darwin 25.1.0)
 - System zig: 0.15.1 available at /opt/homebrew/bin/zig
@@ -266,11 +286,10 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
 - zig2.c generation: ✅ Successful (247MB, aarch64-macos target)
 - Inline assembly: ✅ Compiles without errors
 - Test programs: ✅ Compile successfully
-- **Known Issue**: Mach-O segment ordering problem (dyld error)
-  - Error: "segment '__CONST_ZIG' vm address out of order"
-  - Affects ALL self-hosted ARM64 binaries on macOS
-  - Not related to inline assembly implementation
-  - Separate issue requiring MachO linker fixes
+- Mach-O segment ordering: ✅ FIXED (commit 1399fb41)
+  - Root cause identified: Alphabetical sorting instead of VM address sorting
+  - Solution: Modified Entry.lessThan() to sort by vmaddr when ranks equal
+  - Status: Ready for testing after zig rebuild
 
 ### References
 - DWARF bug documentation: DWARF_INTEGER_UNDERFLOW_BUG.md
