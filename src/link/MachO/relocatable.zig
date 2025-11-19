@@ -18,19 +18,30 @@ pub fn flushObject(macho_file: *MachO, comp: *Compilation, module_obj_path: ?Pat
         // Instead of invoking a full-blown `-r` mode on the input which sadly will strip all
         // debug info segments/sections (this is apparently by design by Apple), we copy
         // the *only* input file over.
-        std.debug.print("DEBUG flushObject: getZigObject()=null, copying single file\n", .{});
         const path = positionals.items[0].path().?;
-        std.debug.print("DEBUG flushObject: copying from {s}\n", .{path.sub_path});
         const in_file = path.root_dir.handle.openFile(path.sub_path, .{}) catch |err|
             return diags.fail("failed to open {f}: {s}", .{ path, @errorName(err) });
+        defer in_file.close();
+
         const stat = in_file.stat() catch |err|
             return diags.fail("failed to stat {f}: {s}", .{ path, @errorName(err) });
-        std.debug.print("DEBUG flushObject: file size={d}, copying to output\n", .{stat.size});
         const amt = in_file.copyRangeAll(0, macho_file.base.file.?, 0, stat.size) catch |err|
             return diags.fail("failed to copy range of file {f}: {s}", .{ path, @errorName(err) });
         if (amt != stat.size)
             return diags.fail("unexpected short write in copy range of file {f}", .{path});
-        std.debug.print("DEBUG flushObject: copy complete, returning early (NOT calling writeHeader)\n", .{});
+
+        // CRITICAL: The copied file may have a zero header (from ARM64 backend).
+        // We must write a proper Mach-O header. Read the copied file to get load commands info.
+        try macho_file.base.file.?.seekTo(0);
+
+        var header: macho.mach_header_64 = undefined;
+        const header_bytes = try macho_file.base.file.?.reader().readBytesNoEof(@sizeOf(macho.mach_header_64));
+        header = @bitCast(header_bytes);
+
+        // Write proper header with magic number
+        const ncmds = header.ncmds;
+        const sizeofcmds = header.sizeofcmds;
+        try writeHeader(macho_file, ncmds, sizeofcmds);
         return;
     }
 
