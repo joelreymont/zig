@@ -71,13 +71,14 @@ pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow, Invalid
     for (self.mir.instructions.items(.tag), 0..) |tag, i| {
         const mir_index: Mir.Inst.Index = @intCast(i);
 
-        // Pseudo instructions don't generate code
+        // Record this as a potential branch target (pseudo instructions map to current offset)
+        self.branch_targets.putAssumeCapacity(mir_index, instruction_offset);
+
+        // Pseudo instructions don't generate code, so don't increment offset
         if (isPseudoInstruction(tag)) {
             continue;
         }
 
-        // Record this as a potential branch target
-        self.branch_targets.putAssumeCapacity(mir_index, instruction_offset);
         instruction_offset += 1;
     }
 
