@@ -407,6 +407,8 @@ pub const Inst = struct {
         pseudo_spill,
         /// Pseudo: Reload from stack
         pseudo_reload,
+        /// Raw encoded instruction (for inline assembly)
+        raw,
     };
 
     /// Operand patterns
@@ -613,6 +615,9 @@ pub const Inst = struct {
 
         /// Navigation index (for function calls to link to)
         nav: u32, // InternPool.Nav.Index
+
+        /// Raw encoded instruction (for inline assembly)
+        raw: u32,
     };
 };
 

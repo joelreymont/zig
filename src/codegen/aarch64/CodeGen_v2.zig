@@ -2717,7 +2717,7 @@ fn airLoop(self: *CodeGen, inst: Air.Inst.Index) !void {
 
 fn airSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
     const switch_br = self.air.unwrapSwitch(inst);
-    const condition = try self.resolveInst(switch_br.operand);
+    const condition = try self.resolveInst(switch_br.operand.toIndex().?);
 
     const cond_reg = switch (condition) {
         .register => |reg| reg,
@@ -2734,15 +2734,15 @@ fn airSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
     };
 
     // Collect branch fixup locations
-    var case_branches = std.ArrayList(Mir.Inst.Index).init(self.gpa);
-    defer case_branches.deinit();
+    var case_branches: std.ArrayListUnmanaged(Mir.Inst.Index) = .empty;
+    defer case_branches.deinit(self.gpa);
 
     // Process each case
     var it = switch_br.iterateCases();
     while (it.next()) |case| {
         // For each item in the case, compare and branch if equal
         for (case.items) |item| {
-            const item_mcv = try self.resolveInst(item);
+            const item_mcv = try self.resolveInst(item.toIndex().?);
 
             // Allocate temp register for comparison
             const cmp_reg = try self.register_manager.allocReg(inst, .gp);
@@ -2788,7 +2788,7 @@ fn airSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
                     .target = 0, // Placeholder
                 } },
             });
-            try case_branches.append(branch_idx);
+            try case_branches.append(self.gpa, branch_idx);
         }
 
         // Skip case body - will be filled in when we process case bodies
@@ -2846,8 +2846,170 @@ fn airLoopSwitchBr(self: *CodeGen, inst: Air.Inst.Index) !void {
 }
 
 fn airAsm(self: *CodeGen, inst: Air.Inst.Index) !void {
-    _ = inst;
-    return self.fail("TODO: ARM64 CodeGen inline assembly", .{});
+    const ty_pl = self.air.instructions.items(.data)[@intFromEnum(inst)].ty_pl;
+    const extra = self.air.extraData(Air.Asm, ty_pl.payload);
+    var extra_index = extra.end;
+    const outputs: []const Air.Inst.Ref = @ptrCast(self.air.extra.items[extra_index..][0..extra.data.flags.outputs_len]);
+    extra_index += outputs.len;
+    const inputs: []const Air.Inst.Ref = @ptrCast(self.air.extra.items[extra_index..][0..extra.data.inputs_len]);
+    extra_index += inputs.len;
+
+    const zcu = self.pt.zcu;
+    const ip = &zcu.intern_pool;
+    const gpa = self.gpa;
+
+    var as: codegen.aarch64.Assemble = .{
+        .source = undefined,
+        .operands = .empty,
+    };
+    defer as.operands.deinit(gpa);
+
+    // Process outputs
+    var result_reg: ?Register = null;
+    for (outputs) |output| {
+        const extra_bytes = std.mem.sliceAsBytes(self.air.extra.items[extra_index..]);
+        const constraint = std.mem.sliceTo(std.mem.sliceAsBytes(self.air.extra.items[extra_index..]), 0);
+        const name = std.mem.sliceTo(extra_bytes[constraint.len + 1 ..], 0);
+        extra_index += (constraint.len + name.len + (2 + 3)) / 4;
+
+        switch (output) {
+            else => return self.fail("invalid constraint: '{s}'", .{constraint}),
+            .none => if (std.mem.startsWith(u8, constraint, "={") and std.mem.endsWith(u8, constraint, "}")) {
+                const reg_name = constraint["={".len .. constraint.len - "}".len];
+                const output_reg = parseRegName(reg_name) orelse
+                    return self.fail("invalid constraint: '{s}'", .{constraint});
+
+                if (!std.mem.eql(u8, name, "_")) {
+                    const operand_gop = try as.operands.getOrPut(gpa, name);
+                    if (operand_gop.found_existing) return self.fail("duplicate output name: '{s}'", .{name});
+                    operand_gop.value_ptr.* = .{ .register = output_reg };
+                }
+                if (result_reg == null) result_reg = output_reg;
+            } else if (std.mem.eql(u8, constraint, "=r")) {
+                const output_reg = try self.register_manager.allocReg(inst, .gp);
+
+                if (!std.mem.eql(u8, name, "_")) {
+                    const operand_gop = try as.operands.getOrPut(gpa, name);
+                    if (operand_gop.found_existing) return self.fail("duplicate output name: '{s}'", .{name});
+                    operand_gop.value_ptr.* = .{ .register = output_reg };
+                }
+                if (result_reg == null) result_reg = output_reg;
+            } else return self.fail("invalid constraint: '{s}'", .{constraint}),
+        }
+    }
+
+    // Process inputs
+    for (inputs) |input| {
+        const extra_bytes = std.mem.sliceAsBytes(self.air.extra.items[extra_index..]);
+        const constraint = std.mem.sliceTo(extra_bytes, 0);
+        const name = std.mem.sliceTo(extra_bytes[constraint.len + 1 ..], 0);
+        extra_index += (constraint.len + name.len + (2 + 3)) / 4;
+
+        const input_mcv = try self.resolveInst(input.toIndex().?);
+
+        if (std.mem.startsWith(u8, constraint, "{") and std.mem.endsWith(u8, constraint, "}")) {
+            const reg_name = constraint["{".len .. constraint.len - "}".len];
+            const input_reg = parseRegName(reg_name) orelse
+                return self.fail("invalid constraint: '{s}'", .{constraint});
+
+            // Move input to specified register
+            switch (input_mcv) {
+                .register => |reg| if (reg.id() != input_reg.id()) {
+                    try self.addInst(.{
+                        .tag = .mov,
+                        .ops = .rr,
+                        .data = .{ .rr = .{ .rd = input_reg, .rn = reg } },
+                    });
+                },
+                .immediate => |imm| {
+                    try self.addInst(.{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{ .rd = input_reg, .imm = @intCast(imm & 0xFFFF) } },
+                    });
+                },
+                else => return self.fail("TODO: input MCValue type {s}", .{@tagName(input_mcv)}),
+            }
+
+            if (!std.mem.eql(u8, name, "_")) {
+                const operand_gop = try as.operands.getOrPut(gpa, name);
+                if (operand_gop.found_existing) return self.fail("duplicate input name: '{s}'", .{name});
+                operand_gop.value_ptr.* = .{ .register = input_reg };
+            }
+        } else if (std.mem.eql(u8, constraint, "r")) {
+            const input_reg = switch (input_mcv) {
+                .register => |reg| reg,
+                .immediate => |imm| blk: {
+                    const reg = try self.register_manager.allocReg(inst, .gp);
+                    try self.addInst(.{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{ .rd = reg, .imm = @intCast(imm & 0xFFFF) } },
+                    });
+                    break :blk reg;
+                },
+                else => return self.fail("TODO: input MCValue type {s}", .{@tagName(input_mcv)}),
+            };
+
+            if (!std.mem.eql(u8, name, "_")) {
+                const operand_gop = try as.operands.getOrPut(gpa, name);
+                if (operand_gop.found_existing) return self.fail("duplicate input name: '{s}'", .{name});
+                operand_gop.value_ptr.* = .{ .register = input_reg };
+            }
+        } else return self.fail("invalid constraint: '{s}'", .{constraint});
+    }
+
+    // Process clobbers
+    const aggregate = ip.indexToKey(extra.data.clobbers).aggregate;
+    const struct_type: Type = .fromInterned(aggregate.ty);
+    for (0..struct_type.structFieldCount(zcu)) |field_index| {
+        switch (switch (aggregate.storage) {
+            .bytes => unreachable,
+            .elems => |elems| elems[field_index],
+            .repeated_elem => |repeated_elem| repeated_elem,
+        }) {
+            else => unreachable,
+            .bool_false => continue,
+            .bool_true => {},
+        }
+        const clobber_name = struct_type.structFieldName(field_index, zcu).toSlice(ip).?;
+        if (std.mem.eql(u8, clobber_name, "memory")) continue;
+        if (std.mem.eql(u8, clobber_name, "nzcv")) continue;
+        if (std.mem.eql(u8, clobber_name, "cc")) continue;
+        // For now, we don't explicitly handle other clobbers
+    }
+
+    // Assemble the inline assembly
+    as.source = std.mem.sliceAsBytes(self.air.extra.items[extra_index..])[0..extra.data.source_len :0];
+
+    // Parse and emit each instruction
+    while (as.nextInstruction() catch |err| switch (err) {
+        error.InvalidSyntax => {
+            const remaining_source = std.mem.span(as.source);
+            return self.fail("unable to assemble: '{s}'", .{std.mem.trim(
+                u8,
+                as.source[0 .. std.mem.indexOfScalar(u8, remaining_source, '\n') orelse remaining_source.len],
+                &std.ascii.whitespace,
+            )});
+        },
+    }) |instruction| {
+        // Convert encoding.Instruction to raw u32 and emit as data
+        const inst_bits: u32 = @bitCast(instruction);
+
+        // Emit as raw instruction
+        try self.addInst(.{
+            .tag = .raw,
+            .ops = .none,
+            .data = .{ .raw = inst_bits },
+        });
+    }
+
+    // Track result if there is one
+    if (result_reg) |reg| {
+        try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = reg }));
+    } else {
+        try self.inst_tracking.put(self.gpa, inst, .init(.none));
+    }
 }
 
 fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
@@ -5369,4 +5531,9 @@ fn reloadReg(self: *CodeGen, inst: Air.Inst.Index, frame_addr: bits.FrameAddr) !
     }
 
     return reg;
+}
+
+/// Parse register name from string (for inline assembly)
+fn parseRegName(name: []const u8) ?Register {
+    return std.meta.stringToEnum(Register, name);
 }

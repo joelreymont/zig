@@ -174,6 +174,14 @@ fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail
             return;
         },
 
+        .raw => {
+            // Raw encoded instruction (from inline assembly)
+            const inst_bits: u32 = inst.data.raw;
+            const raw_inst: encoding.Instruction = @bitCast(inst_bits);
+            try self.instructions.append(gpa, raw_inst);
+            return;
+        },
+
         else => {},
     }
 
