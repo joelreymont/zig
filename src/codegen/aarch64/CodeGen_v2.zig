@@ -4118,7 +4118,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
     // Calculate SP + stack_offset and store in sp_reg
     if (stack_offset <= 4095) {
         try self.addInst(.{
-            .tag = .add_immediate,
+            .tag = .add,
             .ops = .rri,
             .data = .{ .rri = .{
                 .rd = sp_reg,
@@ -4140,9 +4140,10 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
         if (stack_offset > 0xFFFF) {
             try self.addInst(.{
                 .tag = .movk,
-                .ops = .ri_shift,
-                .data = .{ .ri_shift = .{
+                .ops = .rri_shift,
+                .data = .{ .rri_shift = .{
                     .rd = tmp_reg,
+                    .rn = tmp_reg,  // MOVK modifies rd in-place
                     .imm = @intCast((stack_offset >> 16) & 0xFFFF),
                     .shift = 16,
                 } },
@@ -4179,7 +4180,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
             .tag = if (layout.tag_size <= 1) .strb else if (layout.tag_size <= 2) .strh else .str,
             .ops = .rm,
             .data = .{ .rm = .{
-                .rt = tag_reg,
+                .rd = tag_reg,
                 .mem = Memory.simple(sp_reg, tag_off),
             } },
         });
@@ -4193,7 +4194,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
                 .tag = .str,
                 .ops = .rm,
                 .data = .{ .rm = .{
-                    .rt = reg,
+                    .rd = reg,
                     .mem = Memory.simple(sp_reg, payload_off),
                 } },
             });
@@ -4212,7 +4213,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
                 .tag = .str,
                 .ops = .rm,
                 .data = .{ .rm = .{
-                    .rt = temp_reg,
+                    .rd = temp_reg,
                     .mem = Memory.simple(sp_reg, payload_off),
                 } },
             });
@@ -4220,8 +4221,8 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
         else => return self.fail("TODO: ARM64 union_init for MCValue type {s}", .{@tagName(init_val)}),
     }
 
-    // Track the result as a stack offset
-    try self.inst_tracking.put(self.gpa, inst, .init(.{ .stack_offset = stack_offset }));
+    // Track the result as the register containing the union address
+    try self.inst_tracking.put(self.gpa, inst, .init(.{ .register = sp_reg }));
 }
 
 fn airGetUnionTag(self: *CodeGen, inst: Air.Inst.Index) !void {
