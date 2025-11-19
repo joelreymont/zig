@@ -71,6 +71,13 @@
    - Generates unconditional branch (B) back to loop start
    - **Result**: Enables compilation of code with loops
 
+10. **Frame-to-Frame Memory Copy (genSetMem)** (commit bf7aaf1f92)
+    - File: `src/codegen/aarch64/CodeGen_v2.zig:6270-6310`
+    - Added support for `.load_frame` source MCValue in genSetMem
+    - Implements frame-to-frame copy: load from source frame into temp register, then store to destination frame
+    - Handles 1, 2, 4, and 8-byte sizes with appropriate load/store instructions
+    - **Result**: Fixes compilation of compiler_rt functions that copy values between frame locations
+
 ### 🚧 Remaining Work for Self-Hosted Backend
 
 The self-hosted ARM64 backend is partially implemented but missing critical AIR instruction handlers. These are needed to compile the standard library and user programs.
