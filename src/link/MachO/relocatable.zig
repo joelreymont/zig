@@ -743,6 +743,7 @@ fn writeLoadCommands(macho_file: *MachO) error{ LinkFailure, OutOfMemory }!struc
 
 fn writeHeader(macho_file: *MachO, ncmds: usize, sizeofcmds: usize) !void {
     var header: macho.mach_header_64 = .{};
+    header.magic = macho.MH_MAGIC_64;
     header.filetype = macho.MH_OBJECT;
 
     const subsections_via_symbols = for (macho_file.objects.items) |index| {

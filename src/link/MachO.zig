@@ -617,7 +617,9 @@ pub fn flush(
     }
 
     // Write header as the very last operation to ensure nothing overwrites it
+    std.debug.print("DEBUG: flush() about to call writeHeader, ncmds={}, sizeofcmds={}\n", .{ncmds, sizeofcmds});
     try self.writeHeader(ncmds, sizeofcmds);
+    std.debug.print("DEBUG: flush() completed writeHeader call\n", .{});
 }
 
 /// --verbose-link output
@@ -3088,7 +3090,13 @@ fn writeHeader(self: *MachO, ncmds: usize, sizeofcmds: usize) !void {
 
     log.debug("writing Mach-O header {}", .{header});
 
+    // DEBUG: Force output to verify this function is called
+    std.debug.print("DEBUG: writeHeader called, magic=0x{x}, ncmds={}, sizeofcmds={}\n", .{header.magic, header.ncmds, header.sizeofcmds});
+
     try self.pwriteAll(mem.asBytes(&header), 0);
+
+    // DEBUG: Verify write completed
+    std.debug.print("DEBUG: writeHeader pwriteAll completed\n", .{});
 }
 
 fn writeUuid(self: *MachO, uuid_cmd_offset: u64, has_codesig: bool) !void {
