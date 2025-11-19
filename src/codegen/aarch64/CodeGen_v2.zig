@@ -4808,9 +4808,10 @@ fn airArrayToSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
         if ((array_len >> 16) & 0xFFFF != 0) {
             try self.addInst(.{
                 .tag = .movk,
-                .ops = .ri_shift,
-                .data = .{ .ri_shift = .{
+                .ops = .rri_shift,
+                .data = .{ .rri_shift = .{
                     .rd = len_reg,
+                    .rn = len_reg,
                     .imm = @intCast((array_len >> 16) & 0xFFFF),
                     .shift = 16,
                 } },
