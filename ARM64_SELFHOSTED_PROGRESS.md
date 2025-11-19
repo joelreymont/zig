@@ -20,6 +20,21 @@
    - Treats memory constraints as register constraints (sufficient for most use cases)
    - **Result**: Compiler builds successfully, std library constraint errors resolved
 
+4. **Frame Allocation and aggregate_init** (commits a72abafd07, 53cd7b2f50)
+   - File: `src/codegen/aarch64/CodeGen_v2.zig`
+   - Added `FrameAlloc.initSpill()` helper (lines 226-239)
+   - Implemented `allocFrameIndex()` for stack allocation with reuse (lines 5538-5565)
+   - Implemented `genSetMem()` for writing to frame memory (lines 5648-5722)
+   - Implemented `airAggregateInit()` for struct/array initialization (lines 4848-4912)
+   - Supports non-packed structs and arrays with sentinels
+   - **Result**: Aggregate types can now be initialized on the stack
+
+5. **Register Pair Calling Convention** (commit db93a1360b)
+   - File: `src/codegen/aarch64/CodeGen_v2.zig:3161-3229`
+   - Added register_pair support in airCall for both register and stack arguments
+   - Handles slices and multi-register values in function calls
+   - **Result**: Fixes compiler_rt/clear_cache.zig compilation
+
 ### 🚧 Remaining Work for Self-Hosted Backend
 
 The self-hosted ARM64 backend is partially implemented but missing critical AIR instruction handlers. These are needed to compile the standard library and user programs.
@@ -29,19 +44,22 @@ The self-hosted ARM64 backend is partially implemented but missing critical AIR 
 **Location**: `src/codegen/aarch64/CodeGen_v2.zig:739` (genInst switch statement)
 
 Priority 1 (Blocks most std library code):
-- **array_to_slice** - Array to slice conversions (very common)
-- **aggregate_init** - Struct/array initialization
+- ✅ **array_to_slice** - Array to slice conversions (IMPLEMENTED)
+- ✅ **aggregate_init** - Struct/array initialization (IMPLEMENTED)
 - **try** - Error handling expressions
 - **wrap_errunion_err** - Error union wrapping
 
 Priority 2 (Common operations):
+- **repeat** - Loop control flow (requires loop state tracking infrastructure)
+- **mul_wrap** - Wrapping multiplication
 - **slice_elem_val** - Slice element access
 - **error_name** - Error name lookup
 - **field_parent_ptr** - Parent pointer from field
 - **dbg_empty_stmt** - Debug statement markers
 
 Priority 3 (Advanced features):
-- **Register pair arguments** - C calling convention with multiple args
+- ✅ **Register pair arguments** - C calling convention (IMPLEMENTED)
+- **fmov encoding** - Floating point move instruction encoding
 - Proper memory operands for inline assembly (currently use registers)
 
 #### Implementation Pattern
