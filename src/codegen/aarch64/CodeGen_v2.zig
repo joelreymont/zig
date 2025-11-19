@@ -4113,7 +4113,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
     self.max_stack_size = stack_offset + union_abi_size;
 
     // Get the stack pointer for the union
-    const sp_reg = try self.register_manager.allocReg(null, .gp);
+    const sp_reg = try self.register_manager.allocReg(inst, .gp);
 
     // Calculate SP + stack_offset and store in sp_reg
     if (stack_offset <= 4095) {
@@ -4128,7 +4128,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
         });
     } else {
         // Load large offset into temp register
-        const tmp_reg = try self.register_manager.allocReg(null, .gp);
+        const tmp_reg = try self.register_manager.allocReg(inst, .gp);
         try self.addInst(.{
             .tag = .movz,
             .ops = .ri,
@@ -4162,7 +4162,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
     // If tagged union, store the tag first
     if (layout.tag_size > 0) {
         const tag_off: i32 = @intCast(layout.tag_align.forward(layout.payload_size));
-        const tag_reg = try self.register_manager.allocReg(null, .gp);
+        const tag_reg = try self.register_manager.allocReg(inst, .gp);
 
         // Load field index as tag value
         try self.addInst(.{
@@ -4199,7 +4199,7 @@ fn airUnionInit(self: *CodeGen, inst: Air.Inst.Index) !void {
             });
         },
         .immediate => |imm| {
-            const temp_reg = try self.register_manager.allocReg(null, .gp);
+            const temp_reg = try self.register_manager.allocReg(inst, .gp);
             try self.addInst(.{
                 .tag = .movz,
                 .ops = .ri,
