@@ -837,11 +837,14 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .struct_field_ptr_index_3,
         => self.airStructFieldPtrIndex(inst),
         .struct_field_val => self.airStructFieldVal(inst),
+        .field_parent_ptr => return self.fail("TODO: ARM64 CodeGen field_parent_ptr", .{}),
         .ptr_elem_ptr => self.airPtrElemPtr(inst),
         .ptr_elem_val => self.airPtrElemVal(inst),
         .array_elem_val => self.airArrayElemVal(inst),
+        .aggregate_init => return self.fail("TODO: ARM64 CodeGen aggregate_init", .{}),
 
         // Slice operations
+        .slice_elem_val => return self.fail("TODO: ARM64 CodeGen slice_elem_val", .{}),
         .slice => self.airSlice(inst),
         .slice_ptr => self.airSlicePtr(inst),
         .slice_len => self.airSliceLen(inst),
@@ -868,6 +871,9 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .unwrap_errunion_payload_ptr => self.airUnwrapErrUnionPayloadPtr(inst),
         .unwrap_errunion_err_ptr => self.airUnwrapErrUnionErrPtr(inst),
         .wrap_errunion_payload => self.airWrapErrUnionPayload(inst),
+        .wrap_errunion_err => return self.fail("TODO: ARM64 CodeGen wrap_errunion_err", .{}),
+        .@"try" => return self.fail("TODO: ARM64 CodeGen try", .{}),
+        .error_name => return self.fail("TODO: ARM64 CodeGen error_name", .{}),
 
         // Union operations
         .union_init => self.airUnionInit(inst),
@@ -904,6 +910,7 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .dbg_stmt => {},
         .dbg_inline_block => {},
         .dbg_var_ptr, .dbg_var_val => {},
+        .dbg_empty_stmt => {},
 
         else => {
             log.err("TODO: ARM64 CodeGen {s}", .{@tagName(tag)});
