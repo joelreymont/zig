@@ -198,6 +198,8 @@ const BlockData = struct {
     relocs: std.ArrayListUnmanaged(Mir.Inst.Index) = .empty,
     /// State at block entry
     state: State,
+    /// Result value from break instructions
+    result: MCValue = .none,
 
     fn deinit(self: *BlockData, gpa: Allocator) void {
         self.relocs.deinit(gpa);
@@ -2980,6 +2982,17 @@ fn airBr(self: *CodeGen, inst: Air.Inst.Index) !void {
         return self.fail("Branch to unregistered block {d}", .{@intFromEnum(br.block_inst)});
     };
 
+    // Handle block result value
+    if (br.operand != .none) {
+        if (br.operand.toIndex()) |operand_inst| {
+            block_data.result = try self.resolveInst(operand_inst);
+        } else {
+            // It's a constant or type, not an instruction
+            // For now, we'll leave it as .none, but this may need more handling
+            _ = br.operand;
+        }
+    }
+
     // Emit unconditional branch
     const branch_inst: Mir.Inst.Index = @intCast(self.mir_instructions.len);
     try self.addInst(.{
@@ -2990,9 +3003,6 @@ fn airBr(self: *CodeGen, inst: Air.Inst.Index) !void {
 
     // Record this branch for later patching
     try block_data.relocs.append(self.gpa, branch_inst);
-
-    // TODO: Handle block operand value if needed
-    _ = br.operand;
 }
 
 fn airCondBr(self: *CodeGen, inst: Air.Inst.Index) !void {
@@ -3719,6 +3729,9 @@ fn airBlock(self: *CodeGen, inst: Air.Inst.Index) !void {
     for (block_data.relocs.items) |reloc_inst| {
         self.mir_instructions.items(.data)[reloc_inst].rel.target = current_inst;
     }
+
+    // Track the block's result value (set by br instructions)
+    try self.inst_tracking.put(self.gpa, inst, .init(block_data.result));
 }
 
 fn genBody(self: *CodeGen, body: []const Air.Inst.Index) !void {
