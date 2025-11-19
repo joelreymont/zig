@@ -101,20 +101,28 @@ Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
    - **Documentation**: See DWARF_INTEGER_UNDERFLOW_BUG.md for complete analysis
    - **Status**: ✅ DWARF generation now works perfectly on all backends!
 
-12. 🔄 **ARM64 CodeGen Missing Instructions - IN PROGRESS** (Current session)
+12. ✅ **ARM64 CodeGen Missing Instructions - MAJOR PROGRESS** (Commits: 04ef9bef, f2796d3c, 73188eab, a2d4e43d, 73591e49)
    - **Problem**: Many AIR instructions not implemented in CodeGen_v2.zig
    - **Implemented This Session**:
      - ✅ add_wrap / sub_wrap: Mapped to regular add/sub (wrapping is ARM64 default)
      - ✅ union_init: Full implementation with tagged/untagged union support
-   - **Remaining TODOs** (from test output):
-     - inline assembly (.assembly -> airAsm)
-     - switch_br (switch with branch table)
-     - loop_switch_br
-     - Instruction tracking errors (inst value 0xAAAAAABA)
-   - **Architecture Discovery**: ARM64 has two codegen paths:
-     - CodeGen_v2.zig (current, older, incomplete)
-     - Select.zig (newer, more complete - has union_init, field_parent_ptr, etc.)
-   - **Next Steps**: Either complete CodeGen_v2 implementations or investigate switching to Select.zig path
+       - Stack allocation, proper offset handling
+       - Handles register and immediate payloads
+     - ✅ **CRITICAL FIX**: Instruction tracking bug (Commit: a2d4e43d)
+       - Fixed 42 instances of `@enumFromInt(0)` → `inst`
+       - Eliminates 402+ "Instruction not tracked" errors (0xAAAAAAAA sentinel)
+       - Affected: airAtomicRmw, airOverflowOp, airSlice
+     - ✅ switch_br: Basic implementation (Commit: 73591e49)
+       - Case item comparison and branching
+       - Default/else case handling
+       - Forward branch patching
+       - Eliminates 3 switch_br errors
+   - **Remaining TODOs**:
+     - inline assembly (.assembly -> airAsm) - 6 occurrences
+     - loop_switch_br - less common
+     - switch_br ranges (optional enhancement)
+   - **Reference Used**: Select.zig for switch_br patterns
+   - **Status**: Major blockers removed, most standard library code should compile
 
 ### Build Status
 - ✅ Bootstrap: SUCCESSFUL
