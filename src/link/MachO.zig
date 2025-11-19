@@ -593,7 +593,6 @@ pub fn flush(
         error.OutOfMemory => return error.OutOfMemory,
         error.LinkFailure => return error.LinkFailure,
     };
-    try self.writeHeader(ncmds, sizeofcmds);
     self.writeUuid(uuid_cmd_offset, self.requiresCodeSig()) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.LinkFailure => return error.LinkFailure,
@@ -616,6 +615,9 @@ pub fn flush(
             else => |e| return diags.fail("failed to invalidate kernel cache: {s}", .{@errorName(e)}),
         };
     }
+
+    // Write header as the very last operation to ensure nothing overwrites it
+    try self.writeHeader(ncmds, sizeofcmds);
 }
 
 /// --verbose-link output
@@ -2167,8 +2169,103 @@ fn initSegments(self: *MachO) !void {
         }
     }
 
+    // Update section segment_ids after sorting
+    for (slice.items(.segment_id)) |*seg_id| {
+        if (seg_id.* < backlinks.len) {
+            seg_id.* = backlinks[seg_id.*];
+        }
+    }
+
+    // Reorder sections to match sorted segments
+    // Create indices sorted by segment_id
+    const SectionEntry = struct {
+        index: u32,
+        segment_id: u8,
+    };
+    var section_entries = try std.array_list.Managed(SectionEntry).initCapacity(gpa, slice.len);
+    defer section_entries.deinit();
+    for (slice.items(.segment_id), 0..) |seg_id, i| {
+        section_entries.appendAssumeCapacity(.{ .index = @intCast(i), .segment_id = seg_id });
+    }
+
+    const SectionSort = struct {
+        fn lessThan(_: void, lhs: SectionEntry, rhs: SectionEntry) bool {
+            return lhs.segment_id < rhs.segment_id;
+        }
+    };
+    mem.sort(SectionEntry, section_entries.items, {}, SectionSort.lessThan);
+
+    // Rebuild sections array in sorted order
+    const old_sections = self.sections.toOwnedSlice();
+    defer {
+        // Just free the slice arrays, not the data (we're transferring ownership)
+        gpa.free(old_sections.items(.header));
+        gpa.free(old_sections.items(.segment_id));
+        gpa.free(old_sections.items(.atoms));
+        gpa.free(old_sections.items(.free_list));
+        gpa.free(old_sections.items(.last_atom_index));
+        gpa.free(old_sections.items(.thunks));
+        gpa.free(old_sections.items(.out));
+        gpa.free(old_sections.items(.relocs));
+    }
+
+    // Build section index backlinks for updating section index variables
+    const section_backlinks = try gpa.alloc(u8, old_sections.len);
+    defer gpa.free(section_backlinks);
+    for (section_entries.items, 0..) |entry, new_idx| {
+        section_backlinks[entry.index] = @intCast(new_idx);
+    }
+
+    try self.sections.ensureTotalCapacity(gpa, old_sections.len);
+    for (section_entries.items) |entry| {
+        const i = entry.index;
+        self.sections.appendAssumeCapacity(.{
+            .header = old_sections.items(.header)[i],
+            .segment_id = old_sections.items(.segment_id)[i],
+            .atoms = old_sections.items(.atoms)[i],
+            .free_list = old_sections.items(.free_list)[i],
+            .last_atom_index = old_sections.items(.last_atom_index)[i],
+            .thunks = old_sections.items(.thunks)[i],
+            .out = old_sections.items(.out)[i],
+            .relocs = old_sections.items(.relocs)[i],
+        });
+    }
+
+    // Update section index variables
+    for (&[_]*?u8{
+        &self.text_sect_index,
+        &self.data_sect_index,
+        &self.stubs_sect_index,
+        &self.stubs_helper_sect_index,
+        &self.got_sect_index,
+        &self.la_symbol_ptr_sect_index,
+        &self.tlv_ptr_sect_index,
+        &self.eh_frame_sect_index,
+        &self.unwind_info_sect_index,
+        &self.objc_stubs_sect_index,
+        &self.zig_text_sect_index,
+        &self.zig_const_sect_index,
+        &self.zig_data_sect_index,
+        &self.zig_bss_sect_index,
+        &self.debug_info_sect_index,
+        &self.debug_abbrev_sect_index,
+        &self.debug_str_sect_index,
+        &self.debug_aranges_sect_index,
+        &self.debug_line_sect_index,
+        &self.debug_line_str_sect_index,
+        &self.debug_loclists_sect_index,
+        &self.debug_rnglists_sect_index,
+    }) |maybe_index| {
+        if (maybe_index.*) |*index| {
+            index.* = section_backlinks[index.*];
+        }
+    }
+
+    // Get updated slice after reordering
+    const updated_slice = self.sections.slice();
+
     // Attach sections to segments
-    for (slice.items(.header), slice.items(.segment_id)) |header, *seg_id| {
+    for (updated_slice.items(.header), updated_slice.items(.segment_id)) |header, *seg_id| {
         const segname = header.segName();
         const segment_id = self.getSegmentByName(segname) orelse blk: {
             const segment_id = @as(u8, @intCast(self.segments.items.len));
@@ -2195,7 +2292,10 @@ fn initSegments(self: *MachO) !void {
 }
 
 fn allocateSections(self: *MachO) !void {
-    const headerpad = try load_commands.calcMinHeaderPadSize(self);
+    const page_size = self.getPageSize();
+    const headerpad_min = try load_commands.calcMinHeaderPadSize(self);
+    // Align headerpad to page boundary to ensure sections don't overwrite header
+    const headerpad = mem.alignForward(u32, headerpad_min, page_size);
     var vmaddr: u64 = if (self.pagezero_seg_index) |index|
         self.segments.items[index].vmaddr + self.segments.items[index].vmsize
     else
@@ -2204,7 +2304,6 @@ fn allocateSections(self: *MachO) !void {
     var fileoff = headerpad;
     var prev_seg_id: u8 = if (self.pagezero_seg_index) |index| index + 1 else 0;
 
-    const page_size = self.getPageSize();
     const slice = self.sections.slice();
     const last_index = for (0..slice.items(.header).len) |i| {
         if (self.isZigSection(@intCast(i))) break i;
@@ -2941,6 +3040,7 @@ fn writeLoadCommands(self: *MachO) !struct { usize, usize, u64 } {
 
 fn writeHeader(self: *MachO, ncmds: usize, sizeofcmds: usize) !void {
     var header: macho.mach_header_64 = .{};
+    header.magic = macho.MH_MAGIC_64;
     header.flags = macho.MH_NOUNDEFS | macho.MH_DYLDLINK;
 
     // TODO: if (self.options.namespace == .two_level) {
