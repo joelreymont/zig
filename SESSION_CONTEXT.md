@@ -8,7 +8,7 @@
 Author: Joel Reymont <18791+joelreymont@users.noreply.github.com>
 
 ## Latest Commit
-b0383259 - Update SESSION_CONTEXT.md with inline assembly implementation details
+110e7212 - Fix register type conversions in inline assembly for ARM64
 
 ## Session Status: ACTIVE
 
@@ -234,20 +234,20 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
    - Direct emission of pre-encoded instructions
 
 ### Session Statistics
-- Total commits this session: 15
-- Lines added: ~500+
-- Lines modified: ~100+
+- Total commits this session: 16 (15 Linux + 1 macOS)
+- Lines added: ~600+
+- Lines modified: ~150+
 - Major features implemented: 3 (union_init, switch_br, inline assembly)
-- Critical bugs fixed: 2 (DWARF underflow, instruction tracking)
+- Critical bugs fixed: 3 (DWARF underflow, instruction tracking, register type conversion)
 - Standard library functions unblocked: 7+ (syscalls, doNotOptimizeAway, clear_cache)
 
-15. ✅ **Inline Assembly Register Type Conversion** (Session continued on macOS ARM64)
+15. ✅ **Inline Assembly Register Type Conversion** (Commit: 110e7212)
    - **Problem**: Type mismatch between `bits.Register` and `codegen.aarch64.encoding.Register`
    - **Discovery**: airAsm() uses two incompatible register type systems:
      * `bits.Register` - Simple enum(u8) for internal register tracking
      * `codegen.aarch64.encoding.Register` - Complex struct with `.alias` and `.format` fields for assembler
    - **Impact**: Compilation failed at line 2885 with type mismatch error
-   - **Solution** (Commits pending):
+   - **Solution**:
      * Modified parseRegName() to return `codegen.aarch64.encoding.Register`
      * Added bidirectional type conversions in airAsm():
        - For output constraints: Convert encoding.Register → bits.Register for result tracking
