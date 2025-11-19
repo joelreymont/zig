@@ -241,11 +241,36 @@ Building new zig2 binary with inline assembly support to test ARM64 syscall func
 - Critical bugs fixed: 2 (DWARF underflow, instruction tracking)
 - Standard library functions unblocked: 7+ (syscalls, doNotOptimizeAway, clear_cache)
 
-### Build Status
-- Last successful compile: zig2.c generated successfully
-- Inline assembly implementation: Complete and committed
-- Next step: Rebuild zig2 binary and test ARM64 syscall functionality
-- Repository status: Clean (all changes committed and pushed)
+15. ✅ **Inline Assembly Register Type Conversion** (Session continued on macOS ARM64)
+   - **Problem**: Type mismatch between `bits.Register` and `codegen.aarch64.encoding.Register`
+   - **Discovery**: airAsm() uses two incompatible register type systems:
+     * `bits.Register` - Simple enum(u8) for internal register tracking
+     * `codegen.aarch64.encoding.Register` - Complex struct with `.alias` and `.format` fields for assembler
+   - **Impact**: Compilation failed at line 2885 with type mismatch error
+   - **Solution** (Commits pending):
+     * Modified parseRegName() to return `codegen.aarch64.encoding.Register`
+     * Added bidirectional type conversions in airAsm():
+       - For output constraints: Convert encoding.Register → bits.Register for result tracking
+       - For input constraints: Convert bits.Register → encoding.Register for Assemble.operands
+     * Conversion logic:
+       - encoding.Register.Alias → bits.Register: `@enumFromInt(@intFromEnum(alias))`
+       - bits.Register → encoding.Register: Create Alias then call `.x()` or `.w()` methods
+     * Used block expressions (blk:) for proper type casting in switch statements
+   - **Verification**: Successfully compiled test programs with inline assembly
+   - **Result**: zig2.c generated successfully for aarch64-macos target (247MB)
+
+### Build Status (macOS Session)
+- Environment: macOS ARM64 (Darwin 25.1.0)
+- System zig: 0.15.1 available at /opt/homebrew/bin/zig
+- zig1 bootstrap: Built successfully from zig1.wasm
+- zig2.c generation: ✅ Successful (247MB, aarch64-macos target)
+- Inline assembly: ✅ Compiles without errors
+- Test programs: ✅ Compile successfully
+- **Known Issue**: Mach-O segment ordering problem (dyld error)
+  - Error: "segment '__CONST_ZIG' vm address out of order"
+  - Affects ALL self-hosted ARM64 binaries on macOS
+  - Not related to inline assembly implementation
+  - Separate issue requiring MachO linker fixes
 
 ### References
 - DWARF bug documentation: DWARF_INTEGER_UNDERFLOW_BUG.md

@@ -2876,22 +2876,41 @@ fn airAsm(self: *CodeGen, inst: Air.Inst.Index) !void {
             else => return self.fail("invalid constraint: '{s}'", .{constraint}),
             .none => if (std.mem.startsWith(u8, constraint, "={") and std.mem.endsWith(u8, constraint, "}")) {
                 const reg_name = constraint["={".len .. constraint.len - "}".len];
-                const output_reg = parseRegName(reg_name) orelse
+                const output_enc_reg = parseRegName(reg_name) orelse
                     return self.fail("invalid constraint: '{s}'", .{constraint});
 
                 if (!std.mem.eql(u8, name, "_")) {
                     const operand_gop = try as.operands.getOrPut(gpa, name);
                     if (operand_gop.found_existing) return self.fail("duplicate output name: '{s}'", .{name});
-                    operand_gop.value_ptr.* = .{ .register = output_reg };
+                    operand_gop.value_ptr.* = .{ .register = output_enc_reg };
                 }
-                if (result_reg == null) result_reg = output_reg;
+                // Convert encoding.Register.Alias to bits.Register for result tracking
+                if (result_reg == null) {
+                    result_reg = @enumFromInt(@intFromEnum(output_enc_reg.alias));
+                }
             } else if (std.mem.eql(u8, constraint, "=r")) {
                 const output_reg = try self.register_manager.allocReg(inst, .gp);
 
                 if (!std.mem.eql(u8, name, "_")) {
                     const operand_gop = try as.operands.getOrPut(gpa, name);
                     if (operand_gop.found_existing) return self.fail("duplicate output name: '{s}'", .{name});
-                    operand_gop.value_ptr.* = .{ .register = output_reg };
+                    // Convert bits.Register to encoding.Register for Assemble
+                    const enc_reg = switch (output_reg) {
+                        .x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7, .x8, .x9,
+                        .x10, .x11, .x12, .x13, .x14, .x15, .x16, .x17, .x18, .x19,
+                        .x20, .x21, .x22, .x23, .x24, .x25, .x26, .x27, .x28, .x29, .x30 => blk: {
+                            const alias: codegen.aarch64.encoding.Register.Alias = @enumFromInt(@intFromEnum(output_reg));
+                            break :blk alias.x();
+                        },
+                        .w0, .w1, .w2, .w3, .w4, .w5, .w6, .w7, .w8, .w9,
+                        .w10, .w11, .w12, .w13, .w14, .w15, .w16, .w17, .w18, .w19,
+                        .w20, .w21, .w22, .w23, .w24, .w25, .w26, .w27, .w28, .w29, .w30 => blk: {
+                            const alias: codegen.aarch64.encoding.Register.Alias = @enumFromInt(@intFromEnum(output_reg) - @intFromEnum(Register.w0) + @intFromEnum(Register.x0));
+                            break :blk alias.w();
+                        },
+                        else => return self.fail("unsupported register type for inline assembly: {s}", .{@tagName(output_reg)}),
+                    };
+                    operand_gop.value_ptr.* = .{ .register = enc_reg };
                 }
                 if (result_reg == null) result_reg = output_reg;
             } else return self.fail("invalid constraint: '{s}'", .{constraint}),
@@ -2909,23 +2928,26 @@ fn airAsm(self: *CodeGen, inst: Air.Inst.Index) !void {
 
         if (std.mem.startsWith(u8, constraint, "{") and std.mem.endsWith(u8, constraint, "}")) {
             const reg_name = constraint["{".len .. constraint.len - "}".len];
-            const input_reg = parseRegName(reg_name) orelse
+            const input_enc_reg = parseRegName(reg_name) orelse
                 return self.fail("invalid constraint: '{s}'", .{constraint});
+
+            // Convert encoding.Register.Alias to bits.Register for Mir instructions
+            const input_bits_reg: Register = @enumFromInt(@intFromEnum(input_enc_reg.alias));
 
             // Move input to specified register
             switch (input_mcv) {
-                .register => |reg| if (reg.id() != input_reg.id()) {
+                .register => |reg| if (reg.id() != input_bits_reg.id()) {
                     try self.addInst(.{
                         .tag = .mov,
                         .ops = .rr,
-                        .data = .{ .rr = .{ .rd = input_reg, .rn = reg } },
+                        .data = .{ .rr = .{ .rd = input_bits_reg, .rn = reg } },
                     });
                 },
                 .immediate => |imm| {
                     try self.addInst(.{
                         .tag = .movz,
                         .ops = .ri,
-                        .data = .{ .ri = .{ .rd = input_reg, .imm = @intCast(imm & 0xFFFF) } },
+                        .data = .{ .ri = .{ .rd = input_bits_reg, .imm = @intCast(imm & 0xFFFF) } },
                     });
                 },
                 else => return self.fail("TODO: input MCValue type {s}", .{@tagName(input_mcv)}),
@@ -2934,10 +2956,10 @@ fn airAsm(self: *CodeGen, inst: Air.Inst.Index) !void {
             if (!std.mem.eql(u8, name, "_")) {
                 const operand_gop = try as.operands.getOrPut(gpa, name);
                 if (operand_gop.found_existing) return self.fail("duplicate input name: '{s}'", .{name});
-                operand_gop.value_ptr.* = .{ .register = input_reg };
+                operand_gop.value_ptr.* = .{ .register = input_enc_reg };
             }
         } else if (std.mem.eql(u8, constraint, "r")) {
-            const input_reg = switch (input_mcv) {
+            const input_bits_reg = switch (input_mcv) {
                 .register => |reg| reg,
                 .immediate => |imm| blk: {
                     const reg = try self.register_manager.allocReg(inst, .gp);
@@ -2954,7 +2976,23 @@ fn airAsm(self: *CodeGen, inst: Air.Inst.Index) !void {
             if (!std.mem.eql(u8, name, "_")) {
                 const operand_gop = try as.operands.getOrPut(gpa, name);
                 if (operand_gop.found_existing) return self.fail("duplicate input name: '{s}'", .{name});
-                operand_gop.value_ptr.* = .{ .register = input_reg };
+                // Convert bits.Register to encoding.Register for Assemble
+                const input_enc_reg = switch (input_bits_reg) {
+                    .x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7, .x8, .x9,
+                    .x10, .x11, .x12, .x13, .x14, .x15, .x16, .x17, .x18, .x19,
+                    .x20, .x21, .x22, .x23, .x24, .x25, .x26, .x27, .x28, .x29, .x30 => blk: {
+                        const alias: codegen.aarch64.encoding.Register.Alias = @enumFromInt(@intFromEnum(input_bits_reg));
+                        break :blk alias.x();
+                    },
+                    .w0, .w1, .w2, .w3, .w4, .w5, .w6, .w7, .w8, .w9,
+                    .w10, .w11, .w12, .w13, .w14, .w15, .w16, .w17, .w18, .w19,
+                    .w20, .w21, .w22, .w23, .w24, .w25, .w26, .w27, .w28, .w29, .w30 => blk: {
+                        const alias: codegen.aarch64.encoding.Register.Alias = @enumFromInt(@intFromEnum(input_bits_reg) - @intFromEnum(Register.w0) + @intFromEnum(Register.x0));
+                        break :blk alias.w();
+                    },
+                    else => return self.fail("unsupported register type for inline assembly: {s}", .{@tagName(input_bits_reg)}),
+                };
+                operand_gop.value_ptr.* = .{ .register = input_enc_reg };
             }
         } else return self.fail("invalid constraint: '{s}'", .{constraint});
     }
@@ -5534,6 +5572,6 @@ fn reloadReg(self: *CodeGen, inst: Air.Inst.Index, frame_addr: bits.FrameAddr) !
 }
 
 /// Parse register name from string (for inline assembly)
-fn parseRegName(name: []const u8) ?Register {
-    return std.meta.stringToEnum(Register, name);
+fn parseRegName(name: []const u8) ?codegen.aarch64.encoding.Register {
+    return codegen.aarch64.encoding.Register.parse(name);
 }
