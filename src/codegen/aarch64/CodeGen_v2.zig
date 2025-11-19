@@ -299,6 +299,8 @@ pub fn generate(
         .src_loc = src_loc,
     };
 
+    std.debug.print("ARM64 CodeGen: Starting new function generation, mir_instructions.len={d}\n", .{function.mir_instructions.len});
+
     defer function.deinit(gpa);
 
     // Initialize frame allocations
