@@ -129,7 +129,7 @@ fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail
 
     // Special handling for branches (need relocations)
     switch (inst.tag) {
-        .b, .bl => {
+        .b => {
             const source_offset: u32 = @intCast(self.instructions.items.len);
 
             // Emit placeholder instruction
@@ -142,6 +142,16 @@ fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail
                 .target = inst.data.rel.target,
                 .type = .branch_26,
             });
+            return;
+        },
+
+        .bl => {
+            // BL (Branch-and-Link) is for function calls.
+            // It uses .ops = .nav with .data.nav containing a navigation index.
+            // The linker will resolve this to the actual function address.
+            // For now, just encode it directly - linker relocation will be handled elsewhere.
+            const encoded = try encoder.encode(inst);
+            try self.instructions.append(gpa, encoded);
             return;
         },
 
