@@ -32,10 +32,14 @@ pub fn flushObject(macho_file: *MachO, comp: *Compilation, module_obj_path: ?Pat
 
         // CRITICAL: The copied file may have a zero header (from ARM64 backend).
         // We must write a proper Mach-O header. Read the copied file to get load commands info.
-        try macho_file.base.file.?.seekTo(0);
+        macho_file.base.file.?.seekTo(0) catch |err| {
+            return diags.fail("failed to seek in output file: {s}", .{@errorName(err)});
+        };
 
         var header: macho.mach_header_64 = undefined;
-        const header_bytes = try macho_file.base.file.?.reader().readBytesNoEof(@sizeOf(macho.mach_header_64));
+        const header_bytes = macho_file.base.file.?.reader().readBytesNoEof(@sizeOf(macho.mach_header_64)) catch |err| {
+            return diags.fail("failed to read header from output file: {s}", .{@errorName(err)});
+        };
         header = @bitCast(header_bytes);
 
         // Write proper header with magic number
