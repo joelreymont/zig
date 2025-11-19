@@ -1356,7 +1356,7 @@ fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
         } else {
             // ADD dst, base, index, LSL #shift
             // For now, do it in two steps: shift then add
-            const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp_reg = try self.register_manager.allocReg(inst, .gp);
 
             // LSL temp, index, #shift
             try self.addInst(.{
@@ -1384,7 +1384,7 @@ fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
         }
     } else {
         // Non-power-of-2 size, need to multiply
-        const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const temp_reg = try self.register_manager.allocReg(inst, .gp);
 
         // Load elem_size into temp
         try self.addInst(.{
@@ -1396,7 +1396,7 @@ fn airPtrElemPtr(self: *CodeGen, inst: Air.Inst.Index) !void {
             } },
         });
 
-        const offset_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const offset_reg = try self.register_manager.allocReg(inst, .gp);
 
         // MUL offset, index, elem_size
         try self.addInst(.{
@@ -1455,7 +1455,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
         });
     } else {
         // Calculate address first, then load
-        const addr_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const addr_reg = try self.register_manager.allocReg(inst, .gp);
 
         // Calculate offset
         if (std.math.isPowerOfTwo(elem_size)) {
@@ -1474,7 +1474,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 });
             } else {
                 // Shift and add
-                const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const temp_reg = try self.register_manager.allocReg(inst, .gp);
 
                 try self.addInst(.{
                     .tag = .lsl,
@@ -1500,7 +1500,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
             }
         } else {
             // Non-power-of-2 size
-            const size_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const size_reg = try self.register_manager.allocReg(inst, .gp);
             try self.addInst(.{
                 .tag = .movz,
                 .ops = .ri,
@@ -1510,7 +1510,7 @@ fn airPtrElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 } },
             });
 
-            const offset_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const offset_reg = try self.register_manager.allocReg(inst, .gp);
             try self.addInst(.{
                 .tag = .mul,
                 .ops = .rrr,
@@ -1581,7 +1581,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
         });
     } else {
         // Calculate address dynamically
-        const addr_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const addr_reg = try self.register_manager.allocReg(inst, .gp);
 
         if (std.math.isPowerOfTwo(elem_size)) {
             const shift = std.math.log2_int(u64, elem_size);
@@ -1597,7 +1597,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                     } },
                 });
             } else {
-                const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const temp_reg = try self.register_manager.allocReg(inst, .gp);
 
                 try self.addInst(.{
                     .tag = .lsl,
@@ -1622,7 +1622,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 self.register_manager.freeReg(temp_reg);
             }
         } else {
-            const size_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const size_reg = try self.register_manager.allocReg(inst, .gp);
             try self.addInst(.{
                 .tag = .movz,
                 .ops = .ri,
@@ -1632,7 +1632,7 @@ fn airArrayElemVal(self: *CodeGen, inst: Air.Inst.Index) !void {
                 } },
             });
 
-            const offset_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const offset_reg = try self.register_manager.allocReg(inst, .gp);
             try self.addInst(.{
                 .tag = .mul,
                 .ops = .rrr,
@@ -1697,7 +1697,7 @@ fn airIsNull(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !void
         });
     } else {
         // Tag-based optional: load null tag from offset and compare with 0
-        const tag_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const tag_reg = try self.register_manager.allocReg(inst, .gp);
 
         // Load null tag: LDRB tag, [operand, #opt_child_abi_size]
         try self.addInst(.{
@@ -1754,7 +1754,7 @@ fn airIsNullPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !v
     // Load from pointer and compare
     if (opt_repr_is_pl) {
         // Load pointer value and compare with 0
-        const val_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const val_reg = try self.register_manager.allocReg(inst, .gp);
 
         try self.addInst(.{
             .tag = .ldr,
@@ -1777,7 +1777,7 @@ fn airIsNullPtr(self: *CodeGen, inst: Air.Inst.Index, comptime is_null: bool) !v
         self.register_manager.freeReg(val_reg);
     } else {
         // Load null tag from [ptr + opt_child_abi_size]
-        const tag_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const tag_reg = try self.register_manager.allocReg(inst, .gp);
 
         try self.addInst(.{
             .tag = .ldrb,
@@ -1912,7 +1912,7 @@ fn airWrapOptional(self: *CodeGen, inst: Air.Inst.Index) !void {
         self.max_stack_size = stack_offset + opt_abi_size;
 
         // Get stack pointer for this allocation
-        const stack_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const stack_reg = try self.register_manager.allocReg(inst, .gp);
         defer self.register_manager.freeReg(stack_reg);
 
         // Calculate address: SP + offset
@@ -1930,7 +1930,7 @@ fn airWrapOptional(self: *CodeGen, inst: Air.Inst.Index) !void {
         const payload_reg = switch (payload) {
             .register => |reg| reg,
             .immediate => |imm| blk: {
-                const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const temp = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(temp);
 
                 try self.addInst(.{
@@ -1988,7 +1988,7 @@ fn airWrapOptional(self: *CodeGen, inst: Air.Inst.Index) !void {
         }
 
         // Store tag = 1 at offset payload_abi_size
-        const tag_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const tag_reg = try self.register_manager.allocReg(inst, .gp);
         defer self.register_manager.freeReg(tag_reg);
 
         try self.addInst(.{
@@ -2035,7 +2035,7 @@ fn airIsErr(self: *CodeGen, inst: Air.Inst.Index, comptime is_err: bool) !void {
     const operand = try self.resolveInst(un_op.toIndex().?);
 
     // Load error value from union
-    const err_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    const err_reg = try self.register_manager.allocReg(inst, .gp);
 
     // Error is u16, use LDRH
     try self.addInst(.{
@@ -2144,7 +2144,7 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
     self.max_stack_size = stack_offset + err_union_abi_size;
 
     // Get stack pointer for this allocation
-    const stack_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    const stack_reg = try self.register_manager.allocReg(inst, .gp);
     defer self.register_manager.freeReg(stack_reg);
 
     // Calculate address: SP + offset
@@ -2162,7 +2162,7 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
     const payload_reg = switch (payload) {
         .register => |reg| reg,
         .immediate => |imm| blk: {
-            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp = try self.register_manager.allocReg(inst, .gp);
             defer self.register_manager.freeReg(temp);
 
             try self.addInst(.{
@@ -2220,7 +2220,7 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
     }
 
     // Store error = 0 at error offset (error is u16)
-    const err_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    const err_reg = try self.register_manager.allocReg(inst, .gp);
     defer self.register_manager.freeReg(err_reg);
 
     try self.addInst(.{
@@ -2829,7 +2829,7 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                 },
                 .immediate => |imm| {
                     // Need temp register to hold immediate
-                    const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                    const temp = try self.register_manager.allocReg(inst, .gp);
                     defer self.register_manager.freeReg(temp);
 
                     try self.addInst(.{
@@ -2869,7 +2869,7 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
             },
             .memory => |mem| {
                 // Load function pointer from memory and call via BLR
-                const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const temp_reg = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(temp_reg);
 
                 try self.addInst(.{
@@ -3463,8 +3463,8 @@ fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, 
 
     // Result is a tuple: { result, overflow_bit }
     // We need to allocate two registers for the result
-    const result_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
-    const overflow_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+    const result_reg = try self.register_manager.allocReg(inst, .gp);
+    const overflow_reg = try self.register_manager.allocReg(inst, .gp);
 
     switch (op) {
         .add => {
@@ -3535,7 +3535,7 @@ fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, 
 
             if (is_signed) {
                 // For signed: compute high part with SMULH
-                const high_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const high_reg = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(high_reg);
 
                 try self.addInst(.{
@@ -3550,7 +3550,7 @@ fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, 
 
                 // Check overflow: high != arithmetic_shift_right(low, 63)
                 // ASR temp, result_reg, #63 (sign extend)
-                const sign_ext_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const sign_ext_reg = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(sign_ext_reg);
 
                 try self.addInst(.{
@@ -3585,7 +3585,7 @@ fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, 
                 });
             } else {
                 // For unsigned: compute high part with UMULH
-                const high_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const high_reg = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(high_reg);
 
                 try self.addInst(.{
@@ -3644,7 +3644,7 @@ fn airOverflowOp(self: *CodeGen, inst: Air.Inst.Index, comptime op: enum { add, 
             });
 
             // Shift back to check for overflow
-            const shifted_back_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const shifted_back_reg = try self.register_manager.allocReg(inst, .gp);
             defer self.register_manager.freeReg(shifted_back_reg);
 
             if (is_signed) {
@@ -4271,7 +4271,7 @@ fn airSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
     const ptr_reg = switch (ptr) {
         .register => |reg| reg,
         else => blk: {
-            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp = try self.register_manager.allocReg(inst, .gp);
             // Move the value to a register
             switch (ptr) {
                 .immediate => |imm| {
@@ -4293,7 +4293,7 @@ fn airSlice(self: *CodeGen, inst: Air.Inst.Index) !void {
     const len_reg = switch (len) {
         .register => |reg| reg,
         .immediate => |imm| blk: {
-            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp = try self.register_manager.allocReg(inst, .gp);
             try self.addInst(.{
                 .tag = .movz,
                 .ops = .ri,
@@ -4478,7 +4478,7 @@ fn airMemset(self: *CodeGen, inst: Air.Inst.Index) !void {
     const value_reg = switch (value) {
         .register => |reg| reg,
         .immediate => |imm| blk: {
-            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp = try self.register_manager.allocReg(inst, .gp);
             defer self.register_manager.freeReg(temp);
 
             try self.addInst(.{
@@ -4512,13 +4512,13 @@ fn airMemset(self: *CodeGen, inst: Air.Inst.Index) !void {
     } else {
         // Runtime length or large size - use loop with byte stores
         // Loop counter
-        const counter = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const counter = try self.register_manager.allocReg(inst, .gp);
         defer self.register_manager.freeReg(counter);
 
         const len_reg = switch (len_mcv) {
             .register => |reg| reg,
             .immediate => |imm| blk: {
-                const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const temp = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(temp);
 
                 try self.addInst(.{
@@ -4643,7 +4643,7 @@ fn airMemcpy(self: *CodeGen, inst: Air.Inst.Index) !void {
 
         // Use 8-byte copies where possible, then 4-byte, then 1-byte
         while (offset + 8 <= len) : (offset += 8) {
-            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp = try self.register_manager.allocReg(inst, .gp);
             defer self.register_manager.freeReg(temp);
 
             // LDR temp, [source, #offset]
@@ -4669,7 +4669,7 @@ fn airMemcpy(self: *CodeGen, inst: Air.Inst.Index) !void {
 
         // Handle remaining bytes
         while (offset < len) : (offset += 1) {
-            const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+            const temp = try self.register_manager.allocReg(inst, .gp);
             defer self.register_manager.freeReg(temp);
 
             // LDRB temp, [source, #offset]
@@ -4694,16 +4694,16 @@ fn airMemcpy(self: *CodeGen, inst: Air.Inst.Index) !void {
         }
     } else {
         // Runtime length or large size - use loop
-        const counter = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const counter = try self.register_manager.allocReg(inst, .gp);
         defer self.register_manager.freeReg(counter);
 
-        const temp = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const temp = try self.register_manager.allocReg(inst, .gp);
         defer self.register_manager.freeReg(temp);
 
         const len_reg = switch (len_mcv) {
             .register => |reg| reg,
             .immediate => |imm| blk: {
-                const t = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+                const t = try self.register_manager.allocReg(inst, .gp);
                 defer self.register_manager.freeReg(t);
 
                 try self.addInst(.{
@@ -4908,8 +4908,8 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
         // Result: dst_reg contains the value before the operation
 
         // Allocate temp registers
-        const new_value_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
-        const status_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const new_value_reg = try self.register_manager.allocReg(inst, .gp);
+        const status_reg = try self.register_manager.allocReg(inst, .gp);
         defer self.register_manager.freeReg(new_value_reg);
         defer self.register_manager.freeReg(status_reg);
 
@@ -4996,7 +4996,7 @@ fn airAtomicRmw(self: *CodeGen, inst: Air.Inst.Index) !void {
     var temp_reg_allocated = false;
 
     if (op == .And or op == .Sub) {
-        const temp_reg = try self.register_manager.allocReg(@enumFromInt(0), .gp);
+        const temp_reg = try self.register_manager.allocReg(inst, .gp);
         temp_reg_allocated = true;
         defer if (temp_reg_allocated) self.register_manager.freeReg(temp_reg);
 
