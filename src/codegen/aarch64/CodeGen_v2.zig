@@ -335,6 +335,8 @@ pub fn generate(
     mir.table = try function.mir_table.toOwnedSlice(gpa);
     mir.frame_locs = function.frame_locs.toOwnedSlice();
 
+    std.debug.print("ARM64 CodeGen: generated Mir with {d} instructions\n", .{mir.instructions.len});
+
     return mir;
 }
 
@@ -3107,6 +3109,8 @@ fn airLoop(self: *CodeGen, inst: Air.Inst.Index) !void {
     // Mark the loop start position for backward jumps
     const loop_start: Mir.Inst.Index = @intCast(self.mir_instructions.len);
 
+    std.debug.print("ARM64 CodeGen: airLoop inst={d}, loop_start={d}\n", .{ @intFromEnum(inst), loop_start });
+
     // Process loop body
     try self.genBody(body);
 
@@ -3118,12 +3122,16 @@ fn airLoop(self: *CodeGen, inst: Air.Inst.Index) !void {
 fn airRepeat(self: *CodeGen, inst: Air.Inst.Index) !void {
     const repeat_data = self.air.instructions.items(.data)[@intFromEnum(inst)].repeat;
 
+    std.debug.print("ARM64 CodeGen: airRepeat inst={d}, loop_inst={d}, mir_instructions.len={d}\n", .{ @intFromEnum(inst), @intFromEnum(repeat_data.loop_inst), self.mir_instructions.len });
+
     // Get the loop start position from the loop instruction
     const loop_mcv = try self.resolveInst(repeat_data.loop_inst);
     const loop_start: Mir.Inst.Index = switch (loop_mcv) {
         .immediate => |imm| @intCast(imm),
         else => return self.fail("Loop start not an immediate: {s}", .{@tagName(loop_mcv)}),
     };
+
+    std.debug.print("ARM64 CodeGen: airRepeat resolved loop_start={d}\n", .{loop_start});
 
     // Emit unconditional branch back to loop start
     try self.addInst(.{

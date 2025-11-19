@@ -200,7 +200,7 @@ fn lowerInst(self: *Lower, inst: Mir.Inst, _: Mir.Inst.Index) error{ CodegenFail
 fn applyRelocations(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow }!void {
     for (self.relocations.items) |reloc| {
         const target_offset = self.branch_targets.get(reloc.target) orelse {
-            std.debug.print("Branch target {} not found\n", .{reloc.target});
+            std.debug.print("Branch target {} not found (have {} targets, {} MIR instructions)\n", .{ reloc.target, self.branch_targets.count(), self.mir.instructions.len });
             return error.CodegenFail;
         };
 
