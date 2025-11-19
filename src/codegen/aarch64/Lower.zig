@@ -67,6 +67,7 @@ pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow, Invalid
     // First pass: count instructions and build branch target map
     try self.branch_targets.ensureTotalCapacity(gpa, @intCast(self.mir.instructions.len));
 
+    var instruction_offset: u32 = 0;
     for (self.mir.instructions.items(.tag), 0..) |tag, i| {
         const mir_index: Mir.Inst.Index = @intCast(i);
 
@@ -76,7 +77,8 @@ pub fn lowerMir(self: *Lower) error{ CodegenFail, OutOfMemory, Overflow, Invalid
         }
 
         // Record this as a potential branch target
-        self.branch_targets.putAssumeCapacity(mir_index, @intCast(self.instructions.items.len));
+        self.branch_targets.putAssumeCapacity(mir_index, instruction_offset);
+        instruction_offset += 1;
     }
 
     log.debug("ARM64 Lower: Branch target map built, starting instruction lowering", .{});
