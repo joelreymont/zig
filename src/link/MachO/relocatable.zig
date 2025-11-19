@@ -465,8 +465,9 @@ fn calcSymtabSize(macho_file: *MachO) error{OutOfMemory}!void {
 
 fn allocateSections(macho_file: *MachO) !void {
     const slice = macho_file.sections.slice();
-    for (slice.items(.header)) |*header| {
+    for (slice.items(.header), 0..) |*header, i| {
         const needed_size = header.size;
+        const old_offset = header.offset;
         header.size = 0;
         const alignment = try macho_file.alignPow(header.@"align");
         if (!header.isZerofill()) {
@@ -474,6 +475,9 @@ fn allocateSections(macho_file: *MachO) !void {
             // ZigObject initializes sections with offset=0, and we must move them to after header+load commands.
             if (needed_size > macho_file.allocatedSize(header.offset) or header.offset == 0) {
                 header.offset = try macho_file.cast(u32, try macho_file.findFreeSpace(needed_size, alignment));
+                std.debug.print("DEBUG allocateSections: section[{d}] reallocated from offset {d} to {d} (size={d})\n", .{ i, old_offset, header.offset, needed_size });
+            } else {
+                std.debug.print("DEBUG allocateSections: section[{d}] keeping offset {d} (size={d}, allocated={d})\n", .{ i, header.offset, needed_size, macho_file.allocatedSize(header.offset) });
             }
         }
         if (needed_size > macho_file.allocatedSizeVirtual(header.addr)) {
