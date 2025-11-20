@@ -2253,65 +2253,124 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
         } },
     });
 
-    // Store payload
-    const payload_reg = switch (payload) {
-        .register => |reg| reg,
-        .immediate => |imm| blk: {
-            const temp = try self.register_manager.allocReg(inst, .gp);
-            defer self.register_manager.freeReg(temp);
+    // Store payload based on MCValue type
+    switch (payload) {
+        .none => {
+            // Void-typed payload, no storage needed - just set error = 0 and return
+            // Skip to error storage section
+        },
+        .register, .immediate, .load_frame => {
+            const payload_reg = switch (payload) {
+                .register => |reg| reg,
+                .immediate => |imm| blk: {
+                    const temp = try self.register_manager.allocReg(inst, .gp);
+                    defer self.register_manager.freeReg(temp);
 
-            try self.addInst(.{
-                .tag = .movz,
-                .ops = .ri,
-                .data = .{ .ri = .{
-                    .rd = temp,
-                    .imm = @intCast(imm & 0xFFFF),
-                } },
-            });
-            break :blk temp;
+                    try self.addInst(.{
+                        .tag = .movz,
+                        .ops = .ri,
+                        .data = .{ .ri = .{
+                            .rd = temp,
+                            .imm = @intCast(imm & 0xFFFF),
+                        } },
+                    });
+                    break :blk temp;
+                },
+                .load_frame => |frame_addr| blk: {
+                    const temp = try self.register_manager.allocReg(inst, .gp);
+                    defer self.register_manager.freeReg(temp);
+
+                    // Load from frame into temp register
+                    try self.addInst(.{
+                        .tag = .ldr,
+                        .ops = .rm,
+                        .data = .{ .rm = .{
+                            .rd = temp,
+                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                        } },
+                    });
+                    break :blk temp;
+                },
+                else => unreachable,
+            };
+
+            // Store payload based on size
+            if (payload_abi_size == 16) {
+                // 16-byte payload: store as two 8-byte values
+                // First 8 bytes
+                try self.addInst(.{
+                    .tag = .str,
+                    .ops = .mr,
+                    .data = .{ .mr = .{
+                        .mem = Memory.simple(stack_reg, 0),
+                        .rs = payload_reg,
+                    } },
+                });
+                // Second 8 bytes - need to load high part for load_frame case
+                if (payload == .load_frame) {
+                    const temp2 = try self.register_manager.allocReg(inst, .gp);
+                    defer self.register_manager.freeReg(temp2);
+
+                    const frame_addr = payload.load_frame;
+                    try self.addInst(.{
+                        .tag = .ldr,
+                        .ops = .rm,
+                        .data = .{ .rm = .{
+                            .rd = temp2,
+                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off + 8),
+                        } },
+                    });
+                    try self.addInst(.{
+                        .tag = .str,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = Memory.simple(stack_reg, 8),
+                            .rs = temp2,
+                        } },
+                    });
+                }
+                // For register/immediate: just store low part, high part is zeros
+            } else if (payload_abi_size == 8) {
+                try self.addInst(.{
+                    .tag = .str,
+                    .ops = .mr,
+                    .data = .{ .mr = .{
+                        .mem = Memory.simple(stack_reg, 0),
+                        .rs = payload_reg,
+                    } },
+                });
+            } else if (payload_abi_size == 4) {
+                try self.addInst(.{
+                    .tag = .str,
+                    .ops = .mr,
+                    .data = .{ .mr = .{
+                        .mem = Memory.simple(stack_reg, 0),
+                        .rs = payload_reg,
+                    } },
+                });
+            } else if (payload_abi_size == 2) {
+                try self.addInst(.{
+                    .tag = .strh,
+                    .ops = .mr,
+                    .data = .{ .mr = .{
+                        .mem = Memory.simple(stack_reg, 0),
+                        .rs = payload_reg,
+                    } },
+                });
+            } else if (payload_abi_size == 1) {
+                try self.addInst(.{
+                    .tag = .strb,
+                    .ops = .mr,
+                    .data = .{ .mr = .{
+                        .mem = Memory.simple(stack_reg, 0),
+                        .rs = payload_reg,
+                    } },
+                });
+            } else {
+                return self.fail("TODO: wrap_errunion_payload with payload size {}", .{payload_abi_size});
+            }
         },
         else => return self.fail("TODO: wrap_errunion_payload with payload type {}", .{payload}),
-    };
-
-    // Store payload based on size
-    if (payload_abi_size == 8) {
-        try self.addInst(.{
-            .tag = .str,
-            .ops = .mr,
-            .data = .{ .mr = .{
-                .mem = Memory.simple(stack_reg, 0),
-                .rs = payload_reg,
-            } },
-        });
-    } else if (payload_abi_size == 4) {
-        try self.addInst(.{
-            .tag = .str,
-            .ops = .mr,
-            .data = .{ .mr = .{
-                .mem = Memory.simple(stack_reg, 0),
-                .rs = payload_reg,
-            } },
-        });
-    } else if (payload_abi_size == 2) {
-        try self.addInst(.{
-            .tag = .strh,
-            .ops = .mr,
-            .data = .{ .mr = .{
-                .mem = Memory.simple(stack_reg, 0),
-                .rs = payload_reg,
-            } },
-        });
-    } else if (payload_abi_size == 1) {
-        try self.addInst(.{
-            .tag = .strb,
-            .ops = .mr,
-            .data = .{ .mr = .{
-                .mem = Memory.simple(stack_reg, 0),
-                .rs = payload_reg,
-            } },
-        });
-    } else {
-        return self.fail("TODO: wrap_errunion_payload with payload size {}", .{payload_abi_size});
     }
 
     // Store error = 0 at error offset (error is u16)
