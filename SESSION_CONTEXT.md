@@ -195,10 +195,11 @@ Fixed the ROOT CAUSE of Mach-O binary header corruption: debug instruction track
    - Single value comparisons work
    - Range patterns like `1...10 => ...` would fail
 
-3. **Binary Corruption Issue**: Generated ARM64 binaries are all zeros
-   - Not valid ELF files (magic bytes missing)
-   - Likely related to DWARF errors during binary emission
-   - DWARF bug fix may have resolved this (needs verification)
+3. **Binary Corruption Issue**: ~~Generated ARM64 binaries are all zeros~~ **FIXED** ✅
+   - **Root Cause**: Debug instruction tracking bug (see item #18)
+   - Compiler crashed before generating any code → all-zero headers
+   - **Resolution**: Debug instructions now tracked with MCValue.none
+   - **Status**: Fix committed (a1d7057443), awaiting verification
 
 4. **Instruction Tracking**: Still seeing 3 instances of "Instruction 2863311530 not tracked"
    - 0xAAAAAAAA sentinel value indicates uninitialized/untracked instructions
