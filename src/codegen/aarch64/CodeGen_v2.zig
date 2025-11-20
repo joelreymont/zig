@@ -2286,7 +2286,7 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
                         .ops = .rm,
                         .data = .{ .rm = .{
                             .rd = temp,
-                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                            .mem = Memory.simple(frame_addr.index.toReg().?, frame_addr.off),
                         } },
                     });
                     break :blk temp;
@@ -2317,7 +2317,7 @@ fn airWrapErrUnionPayload(self: *CodeGen, inst: Air.Inst.Index) !void {
                         .ops = .rm,
                         .data = .{ .rm = .{
                             .rd = temp2,
-                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off + 8),
+                            .mem = Memory.simple(frame_addr.index.toReg().?, frame_addr.off + 8),
                         } },
                     });
                     try self.addInst(.{
@@ -3648,7 +3648,7 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                         .ops = .rm,
                         .data = .{ .rm = .{
                             .rd = arg_reg,
-                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                            .mem = Memory.simple(frame_addr.index.toReg().?, frame_addr.off),
                         } },
                     });
                 },
@@ -3719,7 +3719,7 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                         .ops = .rm,
                         .data = .{ .rm = .{
                             .rd = temp,
-                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                            .mem = Memory.simple(frame_addr.index.toReg().?, frame_addr.off),
                         } },
                     });
 

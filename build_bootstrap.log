@@ -1,0 +1,23 @@
+install
++- install zig
+   +- compile exe zig ReleaseFast native 1 errors
+src/codegen/aarch64/CodeGen_v2.zig:2289:42: error: struct 'codegen.aarch64.bits.Memory' has no member named 'soff'
+                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                                   ~~~~~~^~~~~
+src/codegen/aarch64/bits.zig:335:20: note: struct declared here
+pub const Memory = struct {
+                   ^~~~~~
+referenced by:
+    genInst: src/codegen/aarch64/CodeGen_v2.zig:894:62
+    genImpl: src/codegen/aarch64/CodeGen_v2.zig:615:25
+    16 reference(s) hidden; use '-freference-trace=18' to see all references
+error: 1 compilation errors
+failed command: /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/zig build-exe --stack 48234496 -fno-sanitize-thread -OReleaseFast --dep aro --dep build_options -Mroot=/Users/joel/Work/zig/claude/src/main.zig -Maro=/Users/joel/Work/zig/claude/lib/compiler/aro/aro.zig -Mbuild_options=.zig-cache/c/fe44a6ef5887ed813cae5522255c4b7c/options.zig --cache-dir .zig-cache --global-cache-dir /Users/joel/.cache/zig --name zig --zig-lib-dir /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/lib/ --listen=-
+
+Build Summary: 295/298 steps succeeded (1 failed)
+install transitive failure
++- install zig transitive failure
+   +- compile exe zig ReleaseFast native 1 errors
+
+error: the following build command failed with exit code 1:
+.zig-cache/o/6c7efc3e85b8df33e9976d4b0fd512a0/build /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/zig /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/lib /Users/joel/Work/zig/claude .zig-cache /Users/joel/.cache/zig --seed 0xbb4667a3 -Z0e8c05de00dc678c -Doptimize=ReleaseFast
