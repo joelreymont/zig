@@ -2924,8 +2924,11 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
             } else {
                 std.debug.print("DEBUG .none: comp.bin_file already set, skipping creation\n", .{});
             }
+            std.debug.print("DEBUG .none: END of .none cache block (about to exit this case at line 2927)\n", .{});
         },
-        .incremental => {},
+        .incremental => {
+            std.debug.print("DEBUG .incremental: Inside incremental cache mode block\n", .{});
+        },
         .whole => |whole| {
             assert(comp.bin_file == null);
             // We are about to obtain this lock, so here we give other processes a chance first.
