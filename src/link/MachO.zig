@@ -2229,7 +2229,8 @@ fn initSegments(self: *MachO) !void {
 
     std.debug.print("DEBUG: initSegments() calling segments.toOwnedSlice()\n", .{});
     const segments = try self.segments.toOwnedSlice(gpa);
-    defer gpa.free(segments);
+    // FIX: Do NOT free segments here - toOwnedSlice() transferred ownership
+    // defer gpa.free(segments);
 
     std.debug.print("DEBUG: initSegments() ensuring segment capacity\n", .{});
     try self.segments.ensureTotalCapacityPrecise(gpa, segments.len);
