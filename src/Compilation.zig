@@ -3148,8 +3148,10 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
             zcu.intern_pool.dumpGenericInstances(gpa);
         }
     }
+    std.debug.print("DEBUG: After ZCU block (line 3151), proceeding to error check\n", .{});
 
     {
+        std.debug.print("DEBUG: About to call getAllErrorsAlloc()\n", .{});
         var errors = comp.getAllErrorsAlloc() catch |err| {
             std.debug.print("DEBUG: getAllErrorsAlloc failed with error: {s}\n", .{@errorName(err)});
             return;

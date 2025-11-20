@@ -508,55 +508,82 @@ pub fn flush(
     }
     std.debug.print("DEBUG: Passed diags.hasErrors() check at line 501\n", .{});
 
+    std.debug.print("DEBUG: About to initialize internal object (lines 511-518)\n", .{});
     {
         const index = @as(File.Index, @intCast(try self.files.addOne(gpa)));
         self.files.set(index, .{ .internal = .{ .index = index } });
         self.internal_object = index;
         const object = self.getInternalObject().?;
+        std.debug.print("DEBUG: Calling object.init()\n", .{});
         try object.init(gpa);
+        std.debug.print("DEBUG: Calling object.initSymbols()\n", .{});
         try object.initSymbols(self);
     }
+    std.debug.print("DEBUG: Internal object initialized successfully\n", .{});
 
+    std.debug.print("DEBUG: Calling resolveSymbols()\n", .{});
     try self.resolveSymbols();
+    std.debug.print("DEBUG: Calling convertTentativeDefsAndResolveSpecialSymbols()\n", .{});
     try self.convertTentativeDefsAndResolveSpecialSymbols();
+    std.debug.print("DEBUG: Calling dedupLiterals()\n", .{});
     self.dedupLiterals() catch |err| switch (err) {
         error.LinkFailure => return error.LinkFailure,
         else => |e| return diags.fail("failed to deduplicate literals: {s}", .{@errorName(e)}),
     };
+    std.debug.print("DEBUG: dedupLiterals() completed\n", .{});
 
     if (self.base.gc_sections) {
+        std.debug.print("DEBUG: Calling dead_strip.gcAtoms()\n", .{});
         try dead_strip.gcAtoms(self);
+        std.debug.print("DEBUG: dead_strip.gcAtoms() completed\n", .{});
     }
 
+    std.debug.print("DEBUG: Calling checkDuplicates()\n", .{});
     self.checkDuplicates() catch |err| switch (err) {
         error.HasDuplicates => return error.LinkFailure,
         else => |e| return diags.fail("failed to check for duplicate symbol definitions: {s}", .{@errorName(e)}),
     };
+    std.debug.print("DEBUG: checkDuplicates() completed\n", .{});
 
+    std.debug.print("DEBUG: Calling markImportsAndExports()\n", .{});
     self.markImportsAndExports();
+    std.debug.print("DEBUG: Calling deadStripDylibs()\n", .{});
     self.deadStripDylibs();
+    std.debug.print("DEBUG: Processing dylibs\n", .{});
 
     for (self.dylibs.items, 1..) |index, ord| {
         const dylib = self.getFile(index).?.dylib;
         dylib.ordinal = @intCast(ord);
     }
 
+    std.debug.print("DEBUG: Calling claimUnresolved()\n", .{});
     self.claimUnresolved();
 
+    std.debug.print("DEBUG: Calling scanRelocs()\n", .{});
     self.scanRelocs() catch |err| switch (err) {
         error.HasUndefinedSymbols => return error.LinkFailure,
         else => |e| return diags.fail("failed to scan relocations: {s}", .{@errorName(e)}),
     };
+    std.debug.print("DEBUG: scanRelocs() completed\n", .{});
 
+    std.debug.print("DEBUG: Calling initOutputSections()\n", .{});
     try self.initOutputSections();
+    std.debug.print("DEBUG: Calling initSyntheticSections()\n", .{});
     try self.initSyntheticSections();
+    std.debug.print("DEBUG: Calling sortSections()\n", .{});
     try self.sortSections();
+    std.debug.print("DEBUG: Calling addAtomsToSections()\n", .{});
     try self.addAtomsToSections();
+    std.debug.print("DEBUG: Calling calcSectionSizes()\n", .{});
     try self.calcSectionSizes();
 
+    std.debug.print("DEBUG: Calling generateUnwindInfo()\n", .{});
     try self.generateUnwindInfo();
+    std.debug.print("DEBUG: generateUnwindInfo() completed\n", .{});
 
+    std.debug.print("DEBUG: Calling initSegments()\n", .{});
     try self.initSegments();
+    std.debug.print("DEBUG: initSegments() completed\n", .{});
     std.debug.print("DEBUG: About to call allocateSections()\n", .{});
     self.allocateSections() catch |err| switch (err) {
         error.LinkFailure => return error.LinkFailure,
@@ -2124,12 +2151,15 @@ fn generateUnwindInfo(self: *MachO) !void {
 }
 
 fn initSegments(self: *MachO) !void {
+    std.debug.print("DEBUG: initSegments() ENTERED\n", .{});
     const gpa = self.base.comp.gpa;
     const slice = self.sections.slice();
+    std.debug.print("DEBUG: initSegments() got sections slice, len={}\n", .{slice.len});
 
     // Add __PAGEZERO if required
     const pagezero_size = self.pagezero_size orelse default_pagezero_size;
     const aligned_pagezero_size = mem.alignBackward(u64, pagezero_size, self.getPageSize());
+    std.debug.print("DEBUG: initSegments() about to add __PAGEZERO (isDynLib={}, size={})\n", .{self.base.isDynLib(), aligned_pagezero_size});
     if (!self.base.isDynLib() and aligned_pagezero_size > 0) {
         if (aligned_pagezero_size != pagezero_size) {
             // TODO convert into a warning
@@ -2138,22 +2168,30 @@ fn initSegments(self: *MachO) !void {
         }
         self.pagezero_seg_index = try self.addSegment("__PAGEZERO", .{ .vmsize = aligned_pagezero_size });
     }
+    std.debug.print("DEBUG: initSegments() __PAGEZERO done\n", .{});
 
     // __TEXT segment is non-optional
+    std.debug.print("DEBUG: initSegments() about to add __TEXT\n", .{});
     self.text_seg_index = try self.addSegment("__TEXT", .{ .prot = getSegmentProt("__TEXT") });
+    std.debug.print("DEBUG: initSegments() __TEXT done\n", .{});
 
     // Next, create segments required by sections
+    std.debug.print("DEBUG: initSegments() about to create segments for {} sections\n", .{slice.items(.header).len});
     for (slice.items(.header)) |header| {
         const segname = header.segName();
         if (self.getSegmentByName(segname) == null) {
             _ = try self.addSegment(segname, .{ .prot = getSegmentProt(segname) });
         }
     }
+    std.debug.print("DEBUG: initSegments() sections->segments done\n", .{});
 
     // Add __LINKEDIT
+    std.debug.print("DEBUG: initSegments() about to add __LINKEDIT\n", .{});
     self.linkedit_seg_index = try self.addSegment("__LINKEDIT", .{ .prot = getSegmentProt("__LINKEDIT") });
+    std.debug.print("DEBUG: initSegments() __LINKEDIT done\n", .{});
 
     // Sort segments
+    std.debug.print("DEBUG: initSegments() about to sort segments (count={})\n", .{self.segments.items.len});
     const Entry = struct {
         index: u8,
 
@@ -2170,27 +2208,36 @@ fn initSegments(self: *MachO) !void {
         }
     };
 
+    std.debug.print("DEBUG: initSegments() allocating Entry array\n", .{});
     var entries = try std.array_list.Managed(Entry).initCapacity(gpa, self.segments.items.len);
     defer entries.deinit();
+    std.debug.print("DEBUG: initSegments() populating Entry array\n", .{});
     for (0..self.segments.items.len) |index| {
         entries.appendAssumeCapacity(.{ .index = @intCast(index) });
     }
 
+    std.debug.print("DEBUG: initSegments() sorting entries\n", .{});
     mem.sort(Entry, entries.items, self, Entry.lessThan);
 
+    std.debug.print("DEBUG: initSegments() allocating backlinks\n", .{});
     const backlinks = try gpa.alloc(u8, entries.items.len);
     defer gpa.free(backlinks);
+    std.debug.print("DEBUG: initSegments() building backlinks\n", .{});
     for (entries.items, 0..) |entry, i| {
         backlinks[entry.index] = @intCast(i);
     }
 
+    std.debug.print("DEBUG: initSegments() calling segments.toOwnedSlice()\n", .{});
     const segments = try self.segments.toOwnedSlice(gpa);
     defer gpa.free(segments);
 
+    std.debug.print("DEBUG: initSegments() ensuring segment capacity\n", .{});
     try self.segments.ensureTotalCapacityPrecise(gpa, segments.len);
+    std.debug.print("DEBUG: initSegments() re-populating segments in sorted order\n", .{});
     for (entries.items) |sorted| {
         self.segments.appendAssumeCapacity(segments[sorted.index]);
     }
+    std.debug.print("DEBUG: initSegments() segment sorting complete\n", .{});
 
     for (&[_]*?u8{
         &self.pagezero_seg_index,
@@ -2214,13 +2261,16 @@ fn initSegments(self: *MachO) !void {
     }
 
     // Reorder sections to match sorted segments
+    std.debug.print("DEBUG: initSegments() about to reorder sections (count={})\n", .{slice.len});
     // Create indices sorted by segment_id
     const SectionEntry = struct {
         index: u32,
         segment_id: u8,
     };
+    std.debug.print("DEBUG: initSegments() allocating SectionEntry array\n", .{});
     var section_entries = try std.array_list.Managed(SectionEntry).initCapacity(gpa, slice.len);
     defer section_entries.deinit();
+    std.debug.print("DEBUG: initSegments() populating SectionEntry array\n", .{});
     for (slice.items(.segment_id), 0..) |seg_id, i| {
         section_entries.appendAssumeCapacity(.{ .index = @intCast(i), .segment_id = seg_id });
     }
@@ -2230,9 +2280,11 @@ fn initSegments(self: *MachO) !void {
             return lhs.segment_id < rhs.segment_id;
         }
     };
+    std.debug.print("DEBUG: initSegments() sorting section entries\n", .{});
     mem.sort(SectionEntry, section_entries.items, {}, SectionSort.lessThan);
 
     // Rebuild sections array in sorted order
+    std.debug.print("DEBUG: initSegments() calling sections.toOwnedSlice()\n", .{});
     const old_sections = self.sections.toOwnedSlice();
     defer {
         // Just free the slice arrays, not the data (we're transferring ownership)
@@ -2247,13 +2299,17 @@ fn initSegments(self: *MachO) !void {
     }
 
     // Build section index backlinks for updating section index variables
+    std.debug.print("DEBUG: initSegments() allocating section backlinks\n", .{});
     const section_backlinks = try gpa.alloc(u8, old_sections.len);
     defer gpa.free(section_backlinks);
+    std.debug.print("DEBUG: initSegments() building section backlinks\n", .{});
     for (section_entries.items, 0..) |entry, new_idx| {
         section_backlinks[entry.index] = @intCast(new_idx);
     }
 
+    std.debug.print("DEBUG: initSegments() ensuring sections capacity\n", .{});
     try self.sections.ensureTotalCapacity(gpa, old_sections.len);
+    std.debug.print("DEBUG: initSegments() re-populating sections in sorted order\n", .{});
     for (section_entries.items) |entry| {
         const i = entry.index;
         self.sections.appendAssumeCapacity(.{
@@ -2267,8 +2323,10 @@ fn initSegments(self: *MachO) !void {
             .relocs = old_sections.items(.relocs)[i],
         });
     }
+    std.debug.print("DEBUG: initSegments() section reordering complete\n", .{});
 
     // Update section index variables
+    std.debug.print("DEBUG: initSegments() updating section index variables\n", .{});
     for (&[_]*?u8{
         &self.text_sect_index,
         &self.data_sect_index,
@@ -2297,11 +2355,14 @@ fn initSegments(self: *MachO) !void {
             index.* = section_backlinks[index.*];
         }
     }
+    std.debug.print("DEBUG: initSegments() section index variables updated\n", .{});
 
     // Get updated slice after reordering
     const updated_slice = self.sections.slice();
+    std.debug.print("DEBUG: initSegments() got updated slice, len={}\n", .{updated_slice.len});
 
     // Attach sections to segments
+    std.debug.print("DEBUG: initSegments() attaching sections to segments\n", .{});
     for (updated_slice.items(.header), updated_slice.items(.segment_id)) |header, *seg_id| {
         const segname = header.segName();
         const segment_id = self.getSegmentByName(segname) orelse blk: {
@@ -2320,12 +2381,15 @@ fn initSegments(self: *MachO) !void {
         segment.nsects += 1;
         seg_id.* = segment_id;
     }
+    std.debug.print("DEBUG: initSegments() sections attached to segments\n", .{});
 
     // Set __DATA_CONST as READ_ONLY
+    std.debug.print("DEBUG: initSegments() setting __DATA_CONST as READ_ONLY\n", .{});
     if (self.getSegmentByName("__DATA_CONST")) |seg_id| {
         const seg = &self.segments.items[seg_id];
         seg.flags |= macho.SG_READ_ONLY;
     }
+    std.debug.print("DEBUG: initSegments() COMPLETED SUCCESSFULLY\n", .{});
 }
 
 fn allocateSections(self: *MachO) !void {
