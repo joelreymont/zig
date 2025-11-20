@@ -3016,6 +3016,8 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
         },
     }
 
+    std.debug.print("DEBUG: After switch statement (line 3017), proceeding with file system inputs\n", .{});
+
     // From this point we add a preliminary set of file system inputs that
     // affects both incremental and whole cache mode. For incremental cache
     // mode, the long-lived compiler state will track additional file system
@@ -3023,6 +3025,7 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
     // these inputs to make it past AstGen, and once there, we can rely on
     // learning file system inputs from the Cache object.
 
+    std.debug.print("DEBUG: About to process C objects, count = {d}\n", .{comp.c_object_table.count()});
     // For compiling C objects, we rely on the cache hash system to avoid duplicating work.
     // Add a Job for each C object.
     try comp.c_object_work_queue.ensureUnusedCapacity(gpa, comp.c_object_table.count());
@@ -3030,7 +3033,9 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
         comp.c_object_work_queue.pushBackAssumeCapacity(c_object);
         try comp.appendFileSystemInput(try .fromUnresolved(arena, comp.dirs, &.{c_object.src.src_path}));
     }
+    std.debug.print("DEBUG: C objects processed successfully\n", .{});
 
+    std.debug.print("DEBUG: About to process Win32 resources, count = {d}\n", .{comp.win32_resource_table.count()});
     // For compiling Win32 resources, we rely on the cache hash system to avoid duplicating work.
     // Add a Job for each Win32 resource file.
     try comp.win32_resource_work_queue.ensureUnusedCapacity(gpa, comp.win32_resource_table.count());
@@ -3043,8 +3048,11 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
             .manifest => {},
         }
     }
+    std.debug.print("DEBUG: Win32 resources processed successfully\n", .{});
 
+    std.debug.print("DEBUG: Checking if ZCU exists: {s}\n", .{if (comp.zcu != null) "YES" else "NO"});
     if (comp.zcu) |zcu| {
+        std.debug.print("DEBUG: Inside ZCU block, about to setup analysis roots\n", .{});
         const pt: Zcu.PerThread = .activate(zcu, .main);
         defer pt.deactivate();
 
@@ -3078,11 +3086,15 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
             zcu.analysis_roots_buffer[zcu.analysis_roots_len] = ubsan_rt_mod;
             zcu.analysis_roots_len += 1;
         }
+        std.debug.print("DEBUG: ZCU analysis roots setup complete\n", .{});
     }
+    std.debug.print("DEBUG: After ZCU block, preparing linker progress node\n", .{});
 
     // The linker progress node is set up here instead of in `performAllTheWork`, because
     // we also want it around during `flush`.
+    std.debug.print("DEBUG: Checking bin_file for linker progress node: {s}\n", .{if (comp.bin_file != null) "EXISTS" else "NULL"});
     if (comp.bin_file) |lf| {
+        std.debug.print("DEBUG: Setting up linker progress node\n", .{});
         comp.link_prog_node = main_progress_node.start("Linking", 0);
         lf.startProgress(comp.link_prog_node);
     }
