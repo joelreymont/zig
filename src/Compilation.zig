@@ -3173,9 +3173,12 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
         if (comp.emit_llvm_bc) |path| try comp.emitFromCObject(arena, c_obj_path, ".bc", path);
     }
 
+    std.debug.print("DEBUG: About to check cache_use, comp.cache_use = {s}\n", .{@tagName(comp.cache_use)});
     switch (comp.cache_use) {
         .none, .incremental => {
+            std.debug.print("DEBUG: cache_use is .none or .incremental, calling flush()...\n", .{});
             try flush(comp, arena, .main);
+            std.debug.print("DEBUG: flush() returned successfully\n", .{});
         },
         .whole => |whole| {
             if (comp.file_system_inputs) |buf| try man.populateFileSystemInputs(buf);

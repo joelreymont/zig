@@ -371,11 +371,14 @@ pub fn flush(
         return relocatable.flushObject(self, comp, zcu_obj_path);
     }
     std.debug.print("DEBUG: Continuing with full executable flush sequence\n", .{});
+    std.debug.print("DEBUG: zcu_obj_path = {any}\n", .{zcu_obj_path});
 
     var positionals = std.array_list.Managed(link.Input).init(gpa);
     defer positionals.deinit();
 
+    std.debug.print("DEBUG: About to ensureUnusedCapacity, comp.link_inputs.len = {}\n", .{comp.link_inputs.len});
     try positionals.ensureUnusedCapacity(comp.link_inputs.len);
+    std.debug.print("DEBUG: After ensureUnusedCapacity\n", .{});
 
     for (comp.link_inputs) |link_input| switch (link_input) {
         .dso => continue, // handled below
@@ -498,7 +501,12 @@ pub fn flush(
         }
     };
 
-    if (diags.hasErrors()) return error.LinkFailure;
+    std.debug.print("DEBUG: Before diags.hasErrors() check at line 501 - hasErrors={}\n", .{diags.hasErrors()});
+    if (diags.hasErrors()) {
+        std.debug.print("DEBUG: diags.hasErrors() is TRUE at line 501 - returning error.LinkFailure early!\n", .{});
+        return error.LinkFailure;
+    }
+    std.debug.print("DEBUG: Passed diags.hasErrors() check at line 501\n", .{});
 
     {
         const index = @as(File.Index, @intCast(try self.files.addOne(gpa)));
@@ -549,10 +557,12 @@ pub fn flush(
     try self.generateUnwindInfo();
 
     try self.initSegments();
+    std.debug.print("DEBUG: About to call allocateSections()\n", .{});
     self.allocateSections() catch |err| switch (err) {
         error.LinkFailure => return error.LinkFailure,
         else => |e| return diags.fail("failed to allocate sections: {s}", .{@errorName(e)}),
     };
+    std.debug.print("DEBUG: allocateSections() completed\n", .{});
     self.allocateSegments();
     self.allocateSyntheticSymbols();
 
@@ -562,23 +572,35 @@ pub fn flush(
 
     // Beyond this point, everything has been allocated a virtual address and we can resolve
     // the relocations, and commit objects to file.
+    std.debug.print("DEBUG: About to call resizeSections()\n", .{});
     try self.resizeSections();
+    std.debug.print("DEBUG: resizeSections() completed\n", .{});
 
     if (self.getZigObject()) |zo| {
+        std.debug.print("DEBUG: About to call resolveRelocs()\n", .{});
         zo.resolveRelocs(self) catch |err| switch (err) {
             error.ResolveFailed => return error.LinkFailure,
             else => |e| return e,
         };
+        std.debug.print("DEBUG: resolveRelocs() completed\n", .{});
     }
+    std.debug.print("DEBUG: About to call writeSectionsAndUpdateLinkeditSizes()\n", .{});
     try self.writeSectionsAndUpdateLinkeditSizes();
+    std.debug.print("DEBUG: writeSectionsAndUpdateLinkeditSizes() completed\n", .{});
 
+    std.debug.print("DEBUG: About to call writeSectionsToFile()\n", .{});
     try self.writeSectionsToFile();
+    std.debug.print("DEBUG: writeSectionsToFile() completed\n", .{});
+    std.debug.print("DEBUG: About to call allocateLinkeditSegment()\n", .{});
     try self.allocateLinkeditSegment();
+    std.debug.print("DEBUG: allocateLinkeditSegment() completed\n", .{});
+    std.debug.print("DEBUG: About to call writeLinkeditSectionsToFile()\n", .{});
     self.writeLinkeditSectionsToFile() catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.LinkFailure => return error.LinkFailure,
         else => |e| return diags.fail("failed to write linkedit sections to file: {s}", .{@errorName(e)}),
     };
+    std.debug.print("DEBUG: writeLinkeditSectionsToFile() completed\n", .{});
 
     var codesig: ?CodeSignature = if (self.requiresCodeSig()) blk: {
         // Preallocate space for the code signature.
