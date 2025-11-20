@@ -3529,6 +3529,10 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
 
             // Move argument to the appropriate register
             switch (arg_mcv) {
+                .none => {
+                    // Void-typed argument, no runtime representation needed
+                    // Skip marshaling for this argument
+                },
                 .register => |reg| {
                     if (reg.id() != arg_reg.id()) {
                         try self.addInst(.{
@@ -3585,6 +3589,10 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
             const stack_offset = @as(i32, @intCast((i - 8) * 8));
 
             switch (arg_mcv) {
+                .none => {
+                    // Void-typed argument, no runtime representation needed
+                    // Skip marshaling for this argument
+                },
                 .register => |reg| {
                     // STR Xt, [SP, #offset]
                     try self.addInst(.{
