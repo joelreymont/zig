@@ -1,0 +1,85 @@
+install
++- install zig
+   +- compile exe zig ReleaseFast native 1 errors
+src/Compilation.zig:2905:66: error: missing struct field: entry
+                    const lf_open_opts: link.File.OpenOptions = .{};
+                                                                ~^~
+src/Compilation.zig:2905:66: note: missing struct field: entry_addr
+src/Compilation.zig:2905:66: note: missing struct field: stack_size
+src/Compilation.zig:2905:66: note: missing struct field: image_base
+src/Compilation.zig:2905:66: note: missing struct field: emit_relocs
+src/Compilation.zig:2905:66: note: missing struct field: z_nodelete
+src/Compilation.zig:2905:66: note: missing struct field: z_notext
+src/Compilation.zig:2905:66: note: missing struct field: z_defs
+src/Compilation.zig:2905:66: note: missing struct field: z_origin
+src/Compilation.zig:2905:66: note: missing struct field: z_nocopyreloc
+src/Compilation.zig:2905:66: note: missing struct field: z_now
+src/Compilation.zig:2905:66: note: missing struct field: z_relro
+src/Compilation.zig:2905:66: note: missing struct field: z_common_page_size
+src/Compilation.zig:2905:66: note: missing struct field: z_max_page_size
+src/Compilation.zig:2905:66: note: missing struct field: tsaware
+src/Compilation.zig:2905:66: note: missing struct field: nxcompat
+src/Compilation.zig:2905:66: note: missing struct field: dynamicbase
+src/Compilation.zig:2905:66: note: missing struct field: compress_debug_sections
+src/Compilation.zig:2905:66: note: missing struct field: bind_global_refs_locally
+src/Compilation.zig:2905:66: note: missing struct field: import_symbols
+src/Compilation.zig:2905:66: note: missing struct field: import_table
+src/Compilation.zig:2905:66: note: missing struct field: export_table
+src/Compilation.zig:2905:66: note: missing struct field: initial_memory
+src/Compilation.zig:2905:66: note: missing struct field: max_memory
+src/Compilation.zig:2905:66: note: missing struct field: object_host_name
+src/Compilation.zig:2905:66: note: missing struct field: export_symbol_names
+src/Compilation.zig:2905:66: note: missing struct field: global_base
+src/Compilation.zig:2905:66: note: missing struct field: build_id
+src/Compilation.zig:2905:66: note: missing struct field: hash_style
+src/Compilation.zig:2905:66: note: missing struct field: sort_section
+src/Compilation.zig:2905:66: note: missing struct field: major_subsystem_version
+src/Compilation.zig:2905:66: note: missing struct field: minor_subsystem_version
+src/Compilation.zig:2905:66: note: missing struct field: gc_sections
+src/Compilation.zig:2905:66: note: missing struct field: repro
+src/Compilation.zig:2905:66: note: missing struct field: allow_shlib_undefined
+src/Compilation.zig:2905:66: note: missing struct field: allow_undefined_version
+src/Compilation.zig:2905:66: note: missing struct field: enable_new_dtags
+src/Compilation.zig:2905:66: note: missing struct field: subsystem
+src/Compilation.zig:2905:66: note: missing struct field: linker_script
+src/Compilation.zig:2905:66: note: missing struct field: version_script
+src/Compilation.zig:2905:66: note: missing struct field: soname
+src/Compilation.zig:2905:66: note: missing struct field: print_gc_sections
+src/Compilation.zig:2905:66: note: missing struct field: print_icf_sections
+src/Compilation.zig:2905:66: note: missing struct field: print_map
+src/Compilation.zig:2905:66: note: missing struct field: symbol_wrap_set
+src/Compilation.zig:2905:66: note: missing struct field: compatibility_version
+src/Compilation.zig:2905:66: note: missing struct field: lib_directories
+src/Compilation.zig:2905:66: note: missing struct field: framework_dirs
+src/Compilation.zig:2905:66: note: missing struct field: rpath_list
+src/Compilation.zig:2905:66: note: missing struct field: enable_link_snapshots
+src/Compilation.zig:2905:66: note: missing struct field: install_name
+src/Compilation.zig:2905:66: note: missing struct field: entitlements
+src/Compilation.zig:2905:66: note: missing struct field: pagezero_size
+src/Compilation.zig:2905:66: note: missing struct field: headerpad_size
+src/Compilation.zig:2905:66: note: missing struct field: headerpad_max_install_names
+src/Compilation.zig:2905:66: note: missing struct field: dead_strip_dylibs
+src/Compilation.zig:2905:66: note: missing struct field: frameworks
+src/Compilation.zig:2905:66: note: missing struct field: darwin_sdk_layout
+src/Compilation.zig:2905:66: note: missing struct field: force_load_objc
+src/Compilation.zig:2905:66: note: missing struct field: discard_local_symbols
+src/Compilation.zig:2905:66: note: missing struct field: pdb_source_path
+src/Compilation.zig:2905:66: note: missing struct field: pdb_out_path
+src/Compilation.zig:2905:66: note: missing struct field: module_definition_file
+src/link.zig:408:29: note: struct declared here
+    pub const OpenOptions = struct {
+                            ^~~~~~
+referenced by:
+    jitCmd: src/main.zig:5566:28
+    mainArgs: src/main.zig:303:22
+    5 reference(s) hidden; use '-freference-trace=7' to see all references
+error: 1 compilation errors
+failed command: /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/zig build-exe --stack 48234496 -fno-sanitize-thread -OReleaseFast --dep aro --dep build_options -Mroot=/Users/joel/Work/zig/claude/src/main.zig -Maro=/Users/joel/Work/zig/claude/lib/compiler/aro/aro.zig -Mbuild_options=.zig-cache/c/2192d6d31f5bc858456b91596e2ded82/options.zig --cache-dir .zig-cache --global-cache-dir /Users/joel/.cache/zig --name zig --zig-lib-dir /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/lib/ --listen=-
+
+Build Summary: 295/298 steps succeeded (1 failed)
+install transitive failure
++- install zig transitive failure
+   +- compile exe zig ReleaseFast native 1 errors
+
+error: the following build command failed with exit code 1:
+.zig-cache/o/6c7efc3e85b8df33e9976d4b0fd512a0/build /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/zig /private/tmp/zig-aarch64-macos-0.16.0-dev.1364+f0a3df98d/lib /Users/joel/Work/zig/claude .zig-cache /Users/joel/.cache/zig --seed 0xf5db7900 -Z6b10410bdf1ce223 -Doptimize=ReleaseFast

@@ -2887,6 +2887,10 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
     log.debug("Compilation.update for {s}, CacheMode.{s}", .{ comp.root_name, @tagName(comp.cache_use) });
     switch (comp.cache_use) {
         .none => |none| {
+            std.debug.print("DEBUG .none cache mode: comp.bin_file = {s}, comp.emit_bin = {s}\n", .{
+                if (comp.bin_file == null) "NULL" else "SET",
+                if (comp.emit_bin == null) "NULL" else "SET",
+            });
             assert(none.tmp_artifact_directory == null);
             none.tmp_artifact_directory = d: {
                 tmp_dir_rand_int = std.crypto.random.int(u64);
@@ -2900,8 +2904,11 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
             // Create bin_file if needed (similar to .whole cache mode).
             // In .none cache mode, bin_file may not be created during initialization if there's
             // no explicit output path, so we create it here using the tmp_artifact_directory.
+            std.debug.print("DEBUG .none: Checking if we need to create bin_file\n", .{});
             if (comp.bin_file == null) {
+                std.debug.print("DEBUG .none: comp.bin_file is null, checking emit_bin\n", .{});
                 if (comp.emit_bin) |sub_path| {
+                    std.debug.print("DEBUG .none: emit_bin is set to '{s}', creating bin_file\n", .{sub_path});
                     const emit: Cache.Path = .{
                         .root_dir = none.tmp_artifact_directory.?,
                         .sub_path = sub_path,
@@ -2910,7 +2917,12 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
                     comp.bin_file = link.File.createEmpty(arena, comp, emit, none.lf_open_opts) catch |err| {
                         return comp.setMiscFailure(.open_output, "failed to open output file '{f}': {t}", .{ emit, err });
                     };
+                    std.debug.print("DEBUG .none: bin_file created successfully!\n", .{});
+                } else {
+                    std.debug.print("DEBUG .none: emit_bin is NULL, NOT creating bin_file\n", .{});
                 }
+            } else {
+                std.debug.print("DEBUG .none: comp.bin_file already set, skipping creation\n", .{});
             }
         },
         .incremental => {},
@@ -3117,9 +3129,20 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
         }
     }
 
-    if (anyErrors(comp)) {
-        // Skip flushing and keep source files loaded for error reporting.
-        return;
+    {
+        var errors = comp.getAllErrorsAlloc() catch |err| {
+            std.debug.print("DEBUG: getAllErrorsAlloc failed with error: {s}\n", .{@errorName(err)});
+            return;
+        };
+        defer errors.deinit(comp.gpa);
+        const error_count = errors.errorMessageCount();
+        std.debug.print("DEBUG: anyErrors check - error count: {d}\n", .{error_count});
+        if (error_count > 0) {
+            std.debug.print("DEBUG: Compilation has {d} error(s), skipping flush()!\n", .{error_count});
+            // Skip flushing and keep source files loaded for error reporting.
+            return;
+        }
+        std.debug.print("DEBUG: No errors detected, will proceed to flush()...\n", .{});
     }
 
     if (comp.zcu == null and comp.config.output_mode == .Obj and comp.c_object_table.count() == 1) {

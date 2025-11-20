@@ -4142,8 +4142,6 @@ fn serve(
 
                 try comp.update(main_progress_node);
 
-                try comp.flush(arena, main_progress_node);
-
                 try comp.makeBinFileExecutable();
                 try serveUpdateResults(&server, comp);
             },
