@@ -3641,6 +3641,17 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                         });
                     }
                 },
+                .load_frame => |frame_addr| {
+                    // Load from frame into argument register
+                    try self.addInst(.{
+                        .tag = .ldr,
+                        .ops = .rm,
+                        .data = .{ .rm = .{
+                            .rd = arg_reg,
+                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                        } },
+                    });
+                },
                 else => return self.fail("TODO: ARM64 airCall with arg type {}", .{arg_mcv}),
             }
         } else {
@@ -3695,6 +3706,29 @@ fn airCall(self: *CodeGen, inst: Air.Inst.Index) !void {
                         .data = .{ .mr = .{
                             .mem = Memory.simple(.sp, stack_offset),
                             .rs = regs[0],
+                        } },
+                    });
+                },
+                .load_frame => |frame_addr| {
+                    // Load from frame into temp register, then store to stack
+                    const temp = try self.register_manager.allocReg(inst, .gp);
+                    defer self.register_manager.freeReg(temp);
+
+                    try self.addInst(.{
+                        .tag = .ldr,
+                        .ops = .rm,
+                        .data = .{ .rm = .{
+                            .rd = temp,
+                            .mem = Memory.soff(frame_addr.index.toReg().?, frame_addr.off),
+                        } },
+                    });
+
+                    try self.addInst(.{
+                        .tag = .str,
+                        .ops = .mr,
+                        .data = .{ .mr = .{
+                            .mem = Memory.simple(.sp, stack_offset),
+                            .rs = temp,
                         } },
                     });
                 },
