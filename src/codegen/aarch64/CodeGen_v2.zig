@@ -288,7 +288,7 @@ pub fn generate(
         .gpa = gpa,
         .pt = pt,
         .air = air.*,
-        .liveness = liveness.*.?,
+        .liveness = liveness.* orelse undefined,
         .target = &mod.resolved_target.result,
         .mod = mod,
         .owner = .{ .nav_index = func.owner_nav },

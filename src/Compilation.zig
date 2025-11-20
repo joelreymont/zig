@@ -2892,6 +2892,22 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
                 };
                 break :d .{ .path = path, .handle = handle };
             };
+            // Create bin_file if needed (similar to .whole cache mode).
+            // In .none cache mode, bin_file may not be created during initialization if there's
+            // no explicit output path, so we create it here using the tmp_artifact_directory.
+            if (comp.bin_file == null) {
+                if (comp.emit_bin) |sub_path| {
+                    const emit: Cache.Path = .{
+                        .root_dir = none.tmp_artifact_directory.?,
+                        .sub_path = sub_path,
+                    };
+                    // Use default linker options since .none mode doesn't store lf_open_opts.
+                    const lf_open_opts: link.File.OpenOptions = .{};
+                    comp.bin_file = link.File.createEmpty(arena, comp, emit, lf_open_opts) catch |err| {
+                        return comp.setMiscFailure(.open_output, "failed to open output file '{f}': {t}", .{ emit, err });
+                    };
+                }
+            }
         },
         .incremental => {},
         .whole => |whole| {
@@ -3339,7 +3355,9 @@ fn flush(
             };
         }
     }
+    std.debug.print("DEBUG Compilation.flush: comp.bin_file is {s}\n", .{if (comp.bin_file != null) "SET" else "NULL"});
     if (comp.bin_file) |lf| {
+        std.debug.print("DEBUG Compilation.flush: calling linker flush\n", .{});
         var timer = comp.startTimer();
         defer if (timer.finish()) |ns| {
             comp.mutex.lock();
@@ -3351,6 +3369,8 @@ fn flush(
             error.LinkFailure => {}, // Already reported.
             error.OutOfMemory => return error.OutOfMemory,
         };
+    } else {
+        std.debug.print("DEBUG Compilation.flush: SKIPPING linker flush because comp.bin_file is null!\n", .{});
     }
     if (comp.zcu) |zcu| {
         try link.File.C.flushEmitH(zcu);
