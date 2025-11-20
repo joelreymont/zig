@@ -928,11 +928,11 @@ fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ Codeg
         .cmpxchg_weak => self.airCmpxchg(inst, true),
         .cmpxchg_strong => self.airCmpxchg(inst, false),
 
-        // No-ops
-        .dbg_stmt => {},
-        .dbg_inline_block => {},
-        .dbg_var_ptr, .dbg_var_val => {},
-        .dbg_empty_stmt => {},
+        // No-ops - Track with .none so they can be resolved
+        .dbg_stmt => try self.inst_tracking.put(self.gpa, inst, .init(.none)),
+        .dbg_inline_block => try self.inst_tracking.put(self.gpa, inst, .init(.none)),
+        .dbg_var_ptr, .dbg_var_val => try self.inst_tracking.put(self.gpa, inst, .init(.none)),
+        .dbg_empty_stmt => try self.inst_tracking.put(self.gpa, inst, .init(.none)),
 
         else => {
             log.err("TODO: ARM64 CodeGen {s}", .{@tagName(tag)});
