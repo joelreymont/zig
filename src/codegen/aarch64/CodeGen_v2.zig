@@ -756,6 +756,7 @@ fn genEpilogue(self: *CodeGen) !void {
 }
 
 fn genInst(self: *CodeGen, inst: Air.Inst.Index, tag: Air.Inst.Tag) error{ CodegenFail, OutOfMemory, OutOfRegisters }!void {
+    log.debug("genInst: processing instruction {d} with tag {s}", .{ @intFromEnum(inst), @tagName(tag) });
     return switch (tag) {
         // Arithmetic
         .add => self.airAdd(inst),
@@ -6159,8 +6160,14 @@ fn airFence(self: *CodeGen, inst: Air.Inst.Index) !void {
 // ============================================================================
 
 fn resolveInst(self: *CodeGen, inst: Air.Inst.Index) !MCValue {
+    const air_tags = self.air.instructions.items(.tag);
+    const tag = air_tags[@intFromEnum(inst)];
     const tracking = self.inst_tracking.get(inst) orelse {
-        log.err("Instruction {d} not tracked", .{@intFromEnum(inst)});
+        log.err("Instruction {d} (tag={s}) not tracked. inst_tracking has {d} entries", .{
+            @intFromEnum(inst),
+            @tagName(tag),
+            self.inst_tracking.count(),
+        });
         return error.CodegenFail;
     };
 
