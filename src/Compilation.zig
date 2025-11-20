@@ -1581,6 +1581,8 @@ const CacheUse = union(CacheMode) {
         /// We will recursively delete this directory at the end of this update if possible. This
         /// field is non-`null` only inside `update`.
         tmp_artifact_directory: ?Cache.Directory,
+        /// Since we may need to recreate bin_file during update(), we must save these options.
+        lf_open_opts: link.File.OpenOptions,
     };
 
     const Incremental = struct {
@@ -2381,7 +2383,10 @@ pub fn create(gpa: Allocator, arena: Allocator, io: Io, diag: *CreateDiagnostic,
         switch (options.cache_mode) {
             .none => {
                 const none = try arena.create(CacheUse.None);
-                none.* = .{ .tmp_artifact_directory = null };
+                none.* = .{
+                    .tmp_artifact_directory = null,
+                    .lf_open_opts = lf_open_opts,
+                };
                 comp.cache_use = .{ .none = none };
                 if (comp.emit_bin) |path| {
                     comp.bin_file = link.File.open(arena, comp, .{
@@ -2901,9 +2906,8 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
                         .root_dir = none.tmp_artifact_directory.?,
                         .sub_path = sub_path,
                     };
-                    // Use default linker options since .none mode doesn't store lf_open_opts.
-                    const lf_open_opts: link.File.OpenOptions = .{};
-                    comp.bin_file = link.File.createEmpty(arena, comp, emit, lf_open_opts) catch |err| {
+                    // Use the stored linker options from .none initialization.
+                    comp.bin_file = link.File.createEmpty(arena, comp, emit, none.lf_open_opts) catch |err| {
                         return comp.setMiscFailure(.open_output, "failed to open output file '{f}': {t}", .{ emit, err });
                     };
                 }
