@@ -3092,7 +3092,12 @@ pub fn update(comp: *Compilation, main_progress_node: std.Progress.Node) UpdateE
         comp.link_prog_node = .none;
     };
 
-    try comp.performAllTheWork(main_progress_node);
+    std.debug.print("DEBUG: About to call performAllTheWork()...\n", .{});
+    comp.performAllTheWork(main_progress_node) catch |err| {
+        std.debug.print("DEBUG: performAllTheWork() returned error: {s}\n", .{@errorName(err)});
+        return err;
+    };
+    std.debug.print("DEBUG: performAllTheWork() completed successfully!\n", .{});
 
     if (comp.zcu) |zcu| {
         const pt: Zcu.PerThread = .activate(zcu, .main);
