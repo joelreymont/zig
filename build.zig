@@ -720,7 +720,7 @@ fn addCompilerMod(b: *std.Build, options: AddCompilerModOptions) *std.Build.Modu
 fn addCompilerStep(b: *std.Build, options: AddCompilerModOptions) *std.Build.Step.Compile {
     const exe = b.addExecutable(.{
         .name = "zig",
-        .max_rss = 7_800_000_000,
+        .max_rss = 12_000_000_000,  // Increased from 7.8GB to 12GB for ARM64 backend work
         .root_module = addCompilerMod(b, options),
     });
     exe.stack_size = stack_size;
